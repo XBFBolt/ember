@@ -1,8 +1,8 @@
-# Ember: Phase 2 Results for Judges
+# Ember: Results for Judges
 
-**Analysis**: leave-one-subject-out (LOSO) on PROSPIE V3. Each person is scored by a calibration fitted on everyone else.
+**Analysis**: leave-one-subject-out (LOSO) on PROSPIE V3. Each person is scored by a model and calibration fitted on everyone else.
 **Data**: 37 participants with chest heart-rate data (Equivital ECG or Polar strap), 128 trials, 14,041 scored minutes against a rectal reference.
-**Calibration**: 6 conformal strata, the same table the firmware and webapp use (`firmware/ember/conformal_table.h`).
+**Estimator (firmware 2.3)**: the published ECTemp filter plus a small learned correction (`analysis/correction.py`), wrapped in 6-strata conformal calibration. The same coefficients and tables the firmware and webapp use (`firmware/ember/conformal_table.h`).
 
 ---
 
@@ -13,54 +13,77 @@ The Kalman filter carries its own variance, and reading it as a 90% range is the
 | Method | Promised | Measured coverage | Mean width |
 |---|---|---|---|
 | Kalman posterior (uncalibrated) | 90% | **34.3%** | 0.34 °C |
-| Ember conformal (calibrated) | 90% | **89.7%** | 1.34 °C |
+| Ember conformal (calibrated) | 90% | **89.2%** | 0.99 °C |
 
-**Headline**: the Kalman "90%" range held 34% of the time. Ember's held 90% (89.7%).
+**Headline**: the Kalman "90%" range held 34% of the time. Ember's held 89%.
 
 A range that promises 90% and delivers a third of that is worse than no range, because people act on it.
 
 ---
 
-## 2. Coverage by true temperature
+## 2. The learned correction: filter alone vs Ember 2.3
 
-| True core | Minutes | Kalman | Conformal |
-|---|---|---|---|
-| Under 37.5 °C | 3,949 | 36% | 98% |
-| 37.5–38.0 °C | 4,435 | 40% | 95% |
-| 38.0–38.5 °C (Watch) | 3,783 | 31% | 86% |
-| 38.5 °C and up (Act now) | 1,874 | 24% | **67%** |
+ECTemp uses one heart-rate curve for everyone and lags a fast rise. Ember adds a linear correction learned from PROSPIE. Its inputs are things the device already has: the filter's estimate and its 10-minute change, the 5-minute heart rate and its 10-minute change, and heart rate above the wearer's own resting rate (from BASELINE). The correction is capped at ±1.0 °C and is off until a baseline is captured; the device then shows the filter alone with the older, wider table.
 
-The Kalman range is worst where it matters most. Ember's range is well calibrated overall but drops to 67% when true core is 38.5 °C or higher. The calibration is fitted by *predicted* temperature, and when core is high the estimate lags and reads low, so the truth escapes the top of the range. This is the main limitation and we state it.
+| | Filter alone (2.2) | Ember 2.3 |
+|---|---|---|
+| Error (RMSE) | 0.41 °C | **0.32 °C** |
+| Bias | −0.14 °C | −0.01 °C |
+| 90% coverage | 89.7% | 89.2% |
+| Mean ± | 0.67 °C | **0.49 °C** |
+| Coverage at true ≥ 38.5 °C | 67% | 71% |
+| Watch already on at true 38.5 °C (of 73) | 47 | **65** |
+| Watch never fired | 5 | **0** |
+| Act now never fired | 34 | **27** |
+| Act now false alarms (of 55 trials that stayed under 38.5) | 13 | 13 |
+
+- **Better for 31 of 37 people.** RMSE change −0.09 °C, 95% CI over people [−0.13, −0.05]. The largest loss for one person was +0.24 °C.
+- **Not just a bias shift.** A constant offset alone also cuts misses but raises Act now false alarms from 13 to 22 (`learned_correction_results.txt`).
+- **Cost**: specificity at 38.0 °C drops from 0.90 to 0.84, so Watch comes on more often when true core is just under 38.0.
+- **Caveat**: the model was chosen among seven variants on this data, so these gains are slightly optimistic. It has not been tested on a second dataset yet.
 
 ---
 
-## 3. Alert timing: where were the alerts when true core reached 38.5 °C?
+## 3. Coverage by true temperature
+
+| True core | Minutes | Kalman | Ember |
+|---|---|---|---|
+| Under 37.5 °C | 3,949 | 36% | 89% |
+| 37.5–38.0 °C | 4,435 | 40% | 96% |
+| 38.0–38.5 °C (Watch) | 3,783 | 31% | 91% |
+| 38.5 °C and up (Act now) | 1,874 | 24% | **71%** |
+
+The Kalman range is worst where it matters most. Ember's range is calibrated overall but drops to 71% (67% before the correction) when true core is 38.5 °C or higher. The calibration is fitted by *estimated* temperature, and when core is high the estimate still lags and reads low, so the truth escapes the top of the range. This is the main limitation and we state it.
+
+---
+
+## 4. Alert timing: where were the alerts when true core reached 38.5 °C?
 
 73 trials reached a true core of 38.5 °C. At the first minute it did:
 
 | | Watch (estimate ≥ 38.0) | Act now (estimate ≥ 38.5) |
 |---|---|---|
-| Already on | **47 / 73 (64%)**, on for a median 13 min (IQR 6–21) | 18 / 73 (25%), on for a median 8 min |
-| Came on later | 21, median 14 min late, worst 65 | 21, median 41 min late, worst 63 |
-| Never came on | 5 / 73 (7%) | **34 / 73 (47%)** |
+| Already on | **65 / 73 (89%)**, on for a median 12 min (IQR 5–19) | 17 / 73 (23%), on for a median 4 min |
+| Came on later | 8, median 8 min late, worst 41 | 29, median 15 min late, worst 62 |
+| Never came on | **0 / 73** | **27 / 73 (37%)** |
 
-- In **29 / 73 trials (40%)** Watch came on and Act now never did.
-- In **5 / 73 trials (7%)** neither alert ever came on.
+- In **27 / 73 trials (37%)** Watch came on and Act now never did.
+- Neither alert stayed silent in any trial (5 / 73 before the correction).
 
-**What this means**: Watch at 38.0 °C carries the safety load. It is usually on before true core reaches 38.5, while Act now is late or silent in three trials out of four. A single 38.5 °C alarm would have missed nearly half of these trials. This is lag, and it is real.
+**What this means**: Watch at 38.0 °C carries the safety load. It is on before true core reaches 38.5 in nearly nine trials out of ten, while Act now is late or silent in three out of four. A single 38.5 °C alarm would have missed over a third of these trials. The lag is smaller than before, but it is real.
 
 ---
 
-## 4. Men vs women
+## 5. Men vs women
 
 | | Participants | Minutes | Bias | RMSE | 90% coverage |
 |---|---|---|---|---|---|
-| Women | 15 | 5,574 | −0.09 °C | 0.42 °C | 88% |
-| Men | 20 | 7,963 | −0.18 °C | 0.40 °C | 90% |
+| Women | 15 | 5,574 | +0.03 °C | 0.31 °C | 90% |
+| Men | 20 | 7,963 | −0.03 °C | 0.33 °C | 88% |
 
-**Bias difference (men − women)**: −0.10 °C, 95% CI [−0.26, +0.09] (bootstrap over participants, 5,000 resamples). The interval includes zero, so we found no clear difference, but it is about ±0.2 °C wide and cannot rule out a small one.
+**Bias difference (men − women)**: −0.06 °C, 95% CI [−0.16, +0.05] (bootstrap over participants, 5,000 resamples). The interval includes zero, so we found no clear difference; it is narrower than before the correction (±0.2 °C then), but it cannot rule out a small one.
 
-**RMSE difference**: −0.02 °C, 95% CI [−0.13, +0.09].
+**RMSE difference**: +0.02 °C, 95% CI [−0.05, +0.07].
 
 **Why bias, not RMSE**: a systematic offset between groups moves bias a lot and RMSE barely at all, because RMSE is dominated by within-person error. When we tested the pipeline on a simulated group offset, bias caught it and RMSE missed it. An audit on RMSE alone would call a biased model fair.
 
@@ -68,41 +91,43 @@ The Kalman range is worst where it matters most. Ember's range is well calibrate
 
 ---
 
-## 5. Rising vs steady (optional)
+## 6. Rising vs steady (optional)
 
-| Phase | Minutes | Kalman | Conformal |
+| Phase | Minutes | Kalman | Ember |
 |---|---|---|---|
-| Rising (true core up ≥ 0.2 °C in 5 min) | 1,253 | 31% | 85% (84.9%) |
-| Steady (change under 0.1 °C in 5 min) | 6,416 | 33% | 91% |
+| Rising (true core up ≥ 0.2 °C in 5 min) | 1,253 | 31% | 86% |
+| Steady (change under 0.1 °C in 5 min) | 6,416 | 33% | 90% |
 
-Rising coverage is just under 85%, consistent with the lag in section 3. In a quick test, giving rising minutes their own ± did not help; a range that reaches further above the estimate than below helped a little. Neither is shipped.
+Rising coverage is still a little under 90%, consistent with the remaining lag in section 4.
 
 ---
 
-## 6. Other limits worth stating
+## 7. Other limits worth stating
 
-- **Pulse sensors.** The filter only sees the heart-rate number, so the chest calibration carries over to any sensor that reports heart rate correctly. In PROSPIE, finger pulse-sensor trials scored about the same as chest trials from the same conditions (bias −0.41 vs −0.36 °C, coverage 74% vs 78%). The demo uses low-cost pulse sensors; a product would use validated heart-rate sensors.
-- **Missing heart rate.** In the conditions where heart rate was missing in about 80% of minutes, the range held only 74–78%, against 90% overall. Gaps in heart rate cost coverage, so the device must keep dropouts rare and widen the ± while it is coasting.
-- **Accuracy overall**: RMSE 0.41 °C, bias −0.14 °C, R² 0.47. Detecting true core ≥ 38.0 °C: sensitivity 60.6%, specificity 89.5%.
+- **Pulse sensors.** The filter and the correction only see heart rate, so the chest calibration carries over to any sensor that reports heart rate correctly. In PROSPIE, finger pulse-sensor trials scored about the same as chest trials from the same conditions (bias −0.12 vs −0.11 °C, coverage 85% vs 80%). The demo uses a low-cost pulse sensor; a product would use a validated heart-rate sensor.
+- **Missing heart rate.** In the conditions where heart rate was missing in about 80% of minutes, the range held 80–85%, against 89% overall. Gaps in heart rate cost coverage, so the device must keep dropouts rare and widen the ± while it is coasting.
+- **One dataset.** All 37 people come from one lab, walking on a treadmill in a heat chamber. Running, lifting, outdoor work or older wearers may differ. The next test is training on PROSPIE and testing on the open firefighter dataset (DOI 10.17632/7ghxcsd9sz.1).
+- **Resting heart rate** comes from the first 10 minutes of each trial here, and from the 5-minute BASELINE on the device.
+- **Accuracy overall**: RMSE 0.32 °C, bias −0.01 °C, R² 0.67. Detecting true core ≥ 38.0 °C: sensitivity 75.2%, specificity 84.2%.
 - Not a medical device.
 
 ---
 
 ## Key takeaways
 
-1. The Kalman "90%" range covered **34%**. Ember's calibrated range covered **90%** (89.7%).
-2. At true core ≥ 38.5 °C, Ember's coverage drops to **67%** because the estimate lags.
-3. When true core reached 38.5 °C, **Watch was already on in 64%** of trials; **Act now never fired in 47%**.
-4. Watch is the safety threshold, not an extra. In 40% of trials it was the only alert.
-5. No clear difference between men and women (bias −0.10 °C, CI [−0.26, +0.09]), and no published sex-stratified analysis to compare with.
+1. The Kalman "90%" range covered **34%**. Ember's calibrated range covered **89%**.
+2. The learned correction cut error from 0.41 to **0.32 °C** and the ± from 0.67 to **0.49 °C** on average, better for 31 of 37 people, with no increase in Act now false alarms.
+3. When true core reached 38.5 °C, **Watch was already on in 89%** of trials (was 64%); **Act now never fired in 37%** (was 47%).
+4. At true core ≥ 38.5 °C, Ember's coverage is **71%**, not 90%, because the estimate still lags. Watch is the safety threshold, not an extra.
+5. No clear difference between men and women (bias −0.06 °C, CI [−0.16, +0.05]).
 
 ---
 
 ## Figures (`figures/`)
 
 1. `judges_coverage.png`: Kalman vs conformal coverage by true temperature band
-2. `judges_trial_interval.png`: one held-out trial, estimate vs true core with the ± band
-3. `judges_lag.png`: where Watch and Act now stood when true core reached 38.5 °C
+2. `judges_trial_interval.png`: one held-out trial, Ember vs the filter alone vs true core, with the ± band
+3. `judges_lag.png`: where Watch and Act now stood when true core reached 38.5 °C, filter alone vs Ember 2.3
 
 ---
 
@@ -113,10 +138,11 @@ Rising coverage is just under 85%, consistent with the lag in section 3. In a qu
 - **Conditions**: 9 heat-stress protocols, one row per minute
 - **Reference**: rectal temperature
 - **Heart rate**: chest only (Equivital ECG, Polar strap); finger PPG excluded
-- **Validation**: leave-one-subject-out; no test participant's data is in its calibration
+- **Validation**: leave-one-subject-out, nested. No test participant's data is in the correction model or the calibration that scores them.
 
 ---
 
 **Generated**: 2026-10-24
-**Scripts**: `analysis/evaluate.py --prefix ember_chest`, `analysis/judges_results.py`, `analysis/make_judge_figures.py`
+**Scripts**: `analysis/evaluate.py --prefix ember_chest`, `analysis/judges_results.py`, `analysis/make_judge_figures.py`, `analysis/export_firmware_table.py`
 **Output**: `analysis/results_chest.txt`, `analysis/judges_results.txt`, `analysis/judges_results.json`
+**Filter alone (2.2) numbers**: `python3 evaluate.py --no-correction`, or section 7 of `judges_results.txt`

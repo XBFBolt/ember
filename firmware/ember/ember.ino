@@ -54,7 +54,7 @@
 
 using namespace ember;
 
-#define FW_VERSION "2.2.2"
+#define FW_VERSION "2.3.0"
 
 // ----------------------------------------------------------------- pins
 #define PIN_PPG     4
@@ -224,6 +224,7 @@ static void saveCal() {
 
 // --------------------------------------------------------------- state
 static ECTemp ect;
+static Correction corrector;           // learned correction on top of ect (2.3)
 static bool everUpdated = false;
 static int coastMinutes = 0;
 static int secInMinute = 0;
@@ -361,8 +362,11 @@ static float latestAirC() {
 static void printId() {
   Serial.printf("# EMBER v%s - one pulse sensor, three thermistors (2 skin, 1 air), IMU, BLE\n", FW_VERSION);
   Serial.printf("# coefficient check %s\n", coefficientsSane() ? "PASS" : "FAIL");
-  Serial.printf("# conformal %.0f%% level, %d strata, measured coverage %.1f%%\n",
-                CONF_LEVEL * 100, CONF_N_STRATA, CONF_MEASURED_COV * 100);
+  Serial.printf("# conformal %.0f%% level, %d strata, measured coverage %.1f%% (%.1f%% before baseline)\n",
+                CONF_LEVEL * 100, CONF_N_STRATA, CONF_MEASURED_COV * 100, CONF_RAW_MEASURED_COV * 100);
+  Serial.printf("# learned correction: %s (max +/- %.1f C)\n",
+                corrector.on ? "on" : baselineValid ? "off until a heart rate" : "off until BASELINE",
+                CORR_MAX_C);
   Serial.printf("# never withholds the number at or above %.1f C\n", CT_WATCH_C);
   float air = latestAirC();
   if (isnan(air)) Serial.printf("# sensors: IMU %s, air thermistor NO\n", haveImu ? "yes" : "NO");
@@ -464,9 +468,10 @@ static void handleCommand(String s) {
   else if (s == "CALCLEAR") { calA = calB = calC = 1.0f; calibrated = calAir = false; saveCal();
                               Serial.println("# calibration cleared"); }
   else if (s == "BASELINE") {
-    if (!baselineAllowed(ect.clamped(), everUpdated)) {
+    float shown = corrector.estimate(ect.clamped());
+    if (!baselineAllowed(shown, everUpdated)) {
       Serial.printf("# BASELINE ignored: estimate %.2f C is at or above %.1f C. Cool down first.\n",
-                    ect.clamped(), CT_WATCH_C);
+                    shown, CT_WATCH_C);
     } else {
       baselineRunning = true; baselineSec = 0; baseSum = 0; baseN = 0;
       Serial.println("# BASELINE: sit still and quiet for 5 minutes.");
@@ -525,8 +530,9 @@ static void analyse() {
   lastStepKind = 0;
   if (!isnan(hr.hr)) { minuteHrSum += hr.hr; minuteHrN++; }
   if (++secInMinute >= 60) {
+    float minuteHr = NAN;
     if (minuteHrN >= MIN_GOOD_SEC_PER_MINUTE) {
-      float minuteHr = (float)(minuteHrSum / minuteHrN);
+      minuteHr = (float)(minuteHrSum / minuteHrN);
       hrRef.endMinute(minuteHr);
       ect.update(minuteHr);
       everUpdated = true; coastMinutes = 0; lastStepKind = 1;
@@ -534,6 +540,8 @@ static void analyse() {
       hrRef.endMinute(NAN);
       ect.coast(); coastMinutes++; lastStepKind = 2;
     }
+    // Same cadence as the filter: once a minute, after its step.
+    corrector.step(minuteHr, ect.clamped(), baselineValid ? restHr : NAN);
     secInMinute = 0; minuteHrSum = 0; minuteHrN = 0;
   }
 
@@ -546,11 +554,13 @@ static void analyse() {
                     isnan(hr.hr) ? "--" : String(hr.hr, 0).c_str(), baseN);
     if (baselineSec >= BASELINE_SEC) {
       baselineRunning = false;
-      if (!baselineAllowed(ect.clamped(), everUpdated)) {
-        Serial.printf("# baseline CANCELLED: estimate rose to %.2f C during it. Not resetting.\n", ect.clamped());
+      float shown = corrector.estimate(ect.clamped());
+      if (!baselineAllowed(shown, everUpdated)) {
+        Serial.printf("# baseline CANCELLED: estimate rose to %.2f C during it. Not resetting.\n", shown);
       } else if (baseN >= 120) {
         restHr = baseSum / baseN; baselineValid = true;
         ect.initFromRestingHr(restHr);
+        corrector.reset();                 // new filter start: new history
         everUpdated = false; coastMinutes = 0; secInMinute = 0; minuteHrSum = 0; minuteHrN = 0;
         Serial.printf("# baseline OK: resting HR %.1f, starting core estimate %.2f C\n", restHr, ect.ct);
       } else {
@@ -583,9 +593,11 @@ static void analyse() {
     esp_deep_sleep_start();
   }
 
-  // decision
-  float ct = ect.clamped();
-  float half = conformal_half_width(ct) + coastInflation(coastMinutes);
+  // decision. ct is the estimate on screen: corrected once a baseline is
+  // captured, the filter's own before that. Every decision below uses it.
+  float ctFilter = ect.clamped();
+  float ct = corrector.estimate(ctFilter);
+  float half = calibratedHalf(ct, corrector.on, coastMinutes);
   Inputs in{};
   in.ctEst = ct;
   in.hr = hr.hr;
@@ -664,6 +676,11 @@ static void analyse() {
       Serial.printf("# core %.2f +/- %.2f C (Kalman would claim +/- %.2f)  state %s  flags 0x%04X  %s\n",
                     ct, half, snap.kalmanHalf, st == STATE_OK ? "OK" : st == STATE_CAUTION ? "CAUTION" : "REFUSE",
                     flags, flagReason(flags));
+      if (corrector.on)
+        Serial.printf("# filter %.2f C, learned correction %+.2f C\n", ctFilter, corrector.corr);
+      else
+        Serial.printf("# filter %.2f C, learned correction off (%s)\n", ctFilter,
+                      baselineValid ? "no heart rate yet" : "no baseline yet");
       stream = S_NONE;
       break;
     default: break;

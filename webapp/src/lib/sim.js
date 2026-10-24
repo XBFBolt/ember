@@ -13,7 +13,7 @@
  */
 
 import { encodeFrame, decodeFrame, STATE, FLAG, HRQ } from './frame.js';
-import { conformalHalfWidth } from './conformal_table.js';
+import { conformalHalfWidth, conformalHalfWidthRaw } from './conformal_table.js';
 import { THRESHOLDS } from './datastore.js';
 
 const SIM_TICK_MS = 4_000;    // wall clock per frame
@@ -104,7 +104,9 @@ function _frame() {
   const f = {
     seq:      _seq++ & 0xffff,
     core,
-    half:     conformalHalfWidth(core),
+    // As on the device: the learned correction (and its narrower table) is
+    // on only once the baseline is captured; before that, the filter alone.
+    half:     _phase === 'work' ? conformalHalfWidth(core) : conformalHalfWidthRaw(core),
     state:    STATE.OK,
     baselineRunning: false,
     logging:  false,

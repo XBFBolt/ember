@@ -43,6 +43,7 @@ from ectemp import run_series, init_from_resting_hr, self_check
 from conformal import (StratifiedConformal, coverage_table, risk_coverage,
                        gaussian_interval, coverage, DEFAULT_LEVELS)
 import load_data
+import correction
 
 ELEVATED_C = 38.0
 
@@ -135,7 +136,32 @@ def loso(df, n_strata=6, seed=0):
             t[f"c_hi_{a}"] = hi
         t["hw90"] = sc.half_width(t["pred"].to_numpy(), 0.90)
         pieces.append(t)
-    return pd.concat(pieces, ignore_index=True)
+    res = pd.concat(pieces, ignore_index=True)
+    # Same columns as the corrected run, so every consumer reads one schema.
+    res["kalman_pred"] = res["pred"]
+    res["c_lo_raw_0.9"], res["c_hi_raw_0.9"] = res["c_lo_0.9"], res["c_hi_0.9"]
+    res["corr_active"] = False
+    return res
+
+
+def loso_shipped(pred, n_strata=6, use_correction=True):
+    """
+    The estimate the device shows, under leave-one-subject-out. Since
+    firmware 2.3 that is the filter plus the learned correction
+    (correction.py); use_correction=False reproduces 2.2.
+
+    Either way: pred = shipped estimate, kalman_pred = the filter alone,
+    var = the filter's posterior variance (for the Kalman coverage test).
+    When the evaluation includes finger PPG trials, the correction is
+    trained and calibrated on chest heart-rate trials only, as shipped.
+    """
+    if not use_correction:
+        return loso(pred, n_strata=n_strata)
+    feat = correction.add_features(pred)
+    mask = None
+    if "trial_hr_type" in feat and feat["trial_hr_type"].notna().any():
+        mask = feat["trial_hr_type"].isin(load_data.CHEST_HR_TYPES)
+    return correction.loso(feat, n_strata=n_strata, train_mask=mask)
 
 
 def bootstrap_group_diff(res, key="rmse", by="sex", n_boot=2000, seed=0):
@@ -212,7 +238,8 @@ def report(res, label=""):
     print("  " + "-" * 50)
     rows = []
     for a in DEFAULT_LEVELS:
-        glo, ghi = gaussian_interval(res["pred"], res["var"], a)
+        # The Kalman interval is the filter's own: its estimate, its variance.
+        glo, ghi = gaussian_interval(res["kalman_pred"], res["var"], a)
         kc = coverage(res["core_c"], glo, ghi)
         kw = float(np.mean(ghi - glo))
         cc = coverage(res["core_c"], res[f"c_lo_{a}"], res[f"c_hi_{a}"])
@@ -318,7 +345,7 @@ def make_figures(res, prefix="ember"):
     noms = list(DEFAULT_LEVELS)
     kcov, ccov = [], []
     for a in noms:
-        glo, ghi = gaussian_interval(res["pred"], res["var"], a)
+        glo, ghi = gaussian_interval(res["kalman_pred"], res["var"], a)
         kcov.append(coverage(res["core_c"], glo, ghi))
         ccov.append(coverage(res["core_c"], res[f"c_lo_{a}"], res[f"c_hi_{a}"]))
     x = np.arange(len(noms))
@@ -406,6 +433,8 @@ def main():
     ap.add_argument("--synthetic", action="store_true")
     ap.add_argument("--no-personalise", action="store_true",
                     help="use a fixed CT0 of 37.1 for everyone")
+    ap.add_argument("--no-correction", action="store_true",
+                    help="evaluate the filter alone, as firmware 2.2 shipped")
     # 6 matches export_firmware_table.py, so the numbers reported here describe
     # the table the device and webapp actually use.
     ap.add_argument("--strata", type=int, default=6)
@@ -441,7 +470,11 @@ def main():
         sys.exit("give --data <xlsx> or --synthetic")
 
     pred = predict_all(df, personalise_ct0=not args.no_personalise)
-    res = loso(pred, n_strata=args.strata)
+    res = loso_shipped(pred, n_strata=args.strata, use_correction=not args.no_correction)
+    if not args.no_correction:
+        print(f"\n  Shipped estimate: ECTemp + learned correction (firmware 2.3), "
+              f"on for {res['corr_active'].mean():.1%} of scored minutes.")
+        print("  Run with --no-correction for the filter alone (firmware 2.2).")
     summary = report(res, label="(synthetic)" if args.synthetic else "")
 
     if not args.no_plot:

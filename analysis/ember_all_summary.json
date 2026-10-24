@@ -1,51 +1,51 @@
 {
   "overall": {
     "n": 17196,
-    "rmse": 0.43052027148733624,
-    "mae": 0.33676332571284057,
-    "bias": -0.19066064305507618,
-    "sd": 0.38601151335342465,
-    "r2": 0.40131193985065483,
-    "loa_lo": -0.9472432092277885,
-    "loa_hi": 0.5659219231176362
+    "rmse": 0.31036725059691844,
+    "mae": 0.24594177899473751,
+    "bias": -0.02256835481667243,
+    "sd": 0.30955463502726205,
+    "r2": 0.6888533252272077,
+    "loa_lo": -0.629295439470106,
+    "loa_hi": 0.5841587298367612
   },
   "detection": {
-    "sensitivity": 0.5486688851913477,
-    "specificity": 0.9103565705128205,
+    "sensitivity": 0.7319744869661675,
+    "specificity": 0.8599759615384616,
     "prevalence": 0.41939986043265876,
-    "tp": 3957,
-    "fn": 3255,
-    "tn": 9089,
-    "fp": 895
+    "tp": 5279,
+    "fn": 1933,
+    "tn": 8586,
+    "fp": 1398
   },
   "coverage": [
     {
       "nominal": 0.5,
       "kalman_coverage": 0.13532216794603397,
       "kalman_width": 0.14301687441076266,
-      "conformal_coverage": 0.5004070714119563,
-      "conformal_width": 0.544655115427833
+      "conformal_coverage": 0.4948243777622703,
+      "conformal_width": 0.4170149015823063
     },
     {
       "nominal": 0.8,
       "kalman_coverage": 0.2537799488253082,
       "kalman_width": 0.27173652267825543,
-      "conformal_coverage": 0.7951849267271458,
-      "conformal_width": 1.105234893711205
+      "conformal_coverage": 0.7852989067224936,
+      "conformal_width": 0.7593876481942872
     },
     {
       "nominal": 0.9,
       "kalman_coverage": 0.32775063968364737,
       "kalman_width": 0.34877005102215225,
-      "conformal_coverage": 0.8946266573621773,
-      "conformal_width": 1.428171354509925
+      "conformal_coverage": 0.8907304024191672,
+      "conformal_width": 0.9834206182656544
     },
     {
       "nominal": 0.95,
       "kalman_coverage": 0.385845545475692,
       "kalman_width": 0.4155851485439094,
-      "conformal_coverage": 0.9448127471505001,
-      "conformal_width": 1.7235166138327531
+      "conformal_coverage": 0.9449290532682019,
+      "conformal_width": 1.1973989746167912
     }
   ]
 }

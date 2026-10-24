@@ -3,13 +3,13 @@
 **Hardware is now v5** (`wiring_v5.html`): one chest pulse sensor, two skin thermistors, one air thermistor outside the strap, IMU, ESP32-S3, power bank, **Bluetooth to the app**. The SHT40 and the second pulse sensor are gone (firmware 2.2, Phase 3b). No Polar, no OLED, no buzzer, no USB-serial in the worn demo.
 
 Order: 1. Interface (done) → 2. Data → 3. Firmware v2 fixes → 4. Hookup → 5. Demo safety net → 6. Ethics and story → 7. Freeze and present.
-**Software** = Dillon. **Hardware** = team, following the v2 build guide (P0–P9).
+**Software** = Dillon. **Hardware** = team.
 
 ## What "done" looks like on Sunday
 
 - A judge watches a teammate wear Ember through rest → hard work → recovery, live on the projector (laptop, Chrome, Bluetooth). The number rises, Watch and Act now fire, and the ± is shown the whole time.
 - When the sensors can't be trusted, the screen says so and why. It never hides the number at 38.0°C or above.
-- One slide of real results from 37 people: Kalman's "90%" range covered 34% vs Ember's 90%; how late the alarm fires; men vs women.
+- One slide of real results from 37 people: Kalman's "90%" range covered 34% vs Ember's 89%; the learned correction (error 0.41 → 0.32 °C, Watch on in time 47 → 65 of 73); how late the alarm fires; men vs women.
 - If anything fails on stage, replay a recorded real session in the same app, one click away.
 - Clear limits: calibrated on chest heart-rate data, not pulse sensors; not a medical device.
 
@@ -111,7 +111,21 @@ The range under-covers when core rises fast (84.9%) and at true core ≥ 38.5 (6
 - **Tried, doesn't help:** a separate ± while the estimate is rising. Rising coverage stayed at about 85% or dropped to 80%. The estimate isn't rising fast at the moments the truth is.
 - **Helps a little:** a lopsided range, since misses are almost always on the high side: about 0.3° below the estimate and 0.85° above, instead of ± 0.7. Rising coverage 85.6%, coverage at ≥ 38.5 went from 67% to 73%, and the range is narrower overall. Cost: the device sends a low and a high instead of one ± (firmware, BLE frame, app).
 - **The real fix is the lag itself**, in the filter, not the range. Out of scope for the hackathon.
-- **Learned correction (Oct 24, `analysis/learned_correction.py` → `learned_correction_results.txt`):** a ridge model on heart-rate features only (filter output, HR history, resting HR from BASELINE) added to ECTemp, same LOSO and 6-strata conformal. RMSE 0.41 → 0.31, range ±0.67 → ±0.50 at 90% coverage, Watch on at true 38.5 in 65/73 (was 47), Watch never fired 0 (was 5), Act now never fired 25 (was 34), false Act now trials 14 (was 13). Men vs women bias unchanged (−0.08) but the CI is now [−0.17, +0.01]. Not shipped; decide before porting to firmware + webapp + slides.
+- **The lag, partly fixed: learned correction (Oct 24).** Experiment: `analysis/learned_correction.py` → `learned_correction_results.txt` (7 variants). Shipped in Phase 2b below.
+
+## Phase 2b · Learned correction (Oct 24, done in software)
+
+A linear correction on top of ECTemp, from heart-rate features the device already has (filter estimate and its 10-min change, 5-min HR and its 10-min change, HR above BASELINE resting HR). Capped at ±1.0 °C. Off until BASELINE succeeds: then the device shows the filter alone with the 2.2 table.
+
+- [x] `analysis/correction.py`: features defined exactly as the firmware computes them; nested LOSO (model and calibration never see the test person).
+- [x] `export_firmware_table.py` writes coefficients + both tables (`CONF_*` corrected, `CONF_RAW_*` filter alone) to `firmware/ember/conformal_table.h` and `webapp/src/lib/conformal_table.js`, plus golden vectors `tests/correction_vectors.h`.
+- [x] Firmware **2.3.0**: `struct Correction` in `ember_core.h`, stepped once a minute after the filter, reset on BASELINE; every decision (state, Watch rule, BASELINE allowed) uses the shown estimate. `STATUS` prints filter vs correction. Tests: 191 pass, including C == Python on the golden vectors. Sketch type-checks against the host stubs.
+- [x] Webapp: demo uses the corrected ± after baseline, the 2.2 ± before; Coach ± from the table; "How sure" sheet explains the correction, all numbers from the generated table. Node tests 21/21.
+- [x] Judge numbers regenerated (`evaluate.py`, `judges_results.py` section 7, figures with "filter alone" for comparison), `JUDGES_SUMMARY.md`, `RESULTS_ONE_PAGER.md`. Headline: Kalman 34% vs Ember **89%**; RMSE 0.41 → **0.32**; ± 0.67 → **0.49**; Watch on in time 47 → **65**/73; Act now never 34 → **27**; false Act now 13 → 13; better for 31/37 people; men vs women −0.06 [−0.16, +0.05].
+- [ ] **Team reflashes 2.3.0.** `ID` shows "learned correction: off until BASELINE"; after BASELINE, `STATUS` shows "learned correction +x.xx C".
+- [ ] On the device: run BASELINE, then check the ± in the app drops from ~0.6–0.8 to ~0.4–0.6.
+- [ ] Re-record the replay session on 2.3 (old recordings carry 2.2 numbers).
+- [ ] Optional: train on PROSPIE, test on the firefighter dataset (DOI 10.17632/7ghxcsd9sz.1) to answer "does it hold in general?".
 
 ## Phase 3 · Firmware v2 fixes (tonight, before the team flashes)
 
@@ -153,7 +167,7 @@ Wiring in `wiring_v5.html`, `ember_schematic_v5.png`, `ember_protoboard_v5.png`.
 - [x] **Frame layout unchanged;** bytes 14, 15, 18, 19 reserved and sent as "none". CSV is 19 columns: `ms,hr,sqi,hr_q,step_hz,act_g,skinA,skinB,skin,skin_q,air_c,vbat,ct_est,ct_lo,ct_hi,kalman_half,filter_step,state,flags`.
 - [x] Changed together: `ember_core.h`, `ember.ino`, `test_core.cpp`, `ember_ble.py`, `APP_INTERFACE.md`, `frame.js`, `serial.js`, `sim.js` (the Low confidence minute is now a cadence lock), `datastore.js`, `PersonalView.js`, `test_frame.mjs`, `test_link.mjs`, the steering file.
   - Checks: 167 core tests, sketch type-check, `--selftest` (reason order matches), 21 node tests (new: CSV header checked against `ember.ino`, a 2.1 CSV row is rejected).
-- [ ] Build guide for v5 (`guide/phases.html`, `template.html`, `gen_diagrams.py`, `docs/BUILD_GUIDE.md`): BOM, pin table, wiring list, diagrams, expected `ID`/`SCAN`/`TEMP` output, the P6 CAL procedure, the "both pulse sensors AGREED" gates, `HEADROOM_*` tuning.
+- [x] ~~Build guide for v5~~ Dropped Oct 24: `guide/` and `docs/BUILD_GUIDE.md` deleted from the repo and its history (all branches).
 - [ ] On the board: `SCAN` shows only 0x68; `TEMP` shows the air bead near room temperature; `CAL` passes; `ID` says v2.2.2 and "thermistor calibration: yes".
   - [x] Oct 24: on the demo board the thermistors read colder when heated: all three dividers are built upside down (thermistor on the 3V3 side). Fixed in firmware, not rewired: **2.2.1** flipped the air bead, **2.2.2** also skin A and B. `NTC_A_ON_TOP`, `NTC_B_ON_TOP`, `NTC_C_ON_TOP` (all 1) in `ember.ino` flip them with `ntcNodeMv()` (11 new unit tests, 178 pass, compiles for the S3). Set one to 0 if that divider is ever rewired to match the diagram. Rerun `CAL` after flashing: the stored calibration was taken the old way round.
   - Upside down, skin on the chest read below 28 °C, so skin always showed NONE before this fix. Recheck that `TEMP` shows `AGREED` on skin.
@@ -220,7 +234,7 @@ The device sends one 20-byte frame a second over BLE (`docs/APP_INTERFACE.md`). 
   - Replay can be one more source in `device.js`, calling `ingestFrame(decodeFrame(bytes), t)` with its own clock, the same way `sim.js` does.
   - [x] Oct 24, quick version (recording skipped): "Replay sample" in the connection menu plays `webapp/demo/resting_sample.csv` (the firmware's 19-column `START` CSV) at 1×, looping, through `csvLineToFrame` → `encodeFrame` → `decodeFrame` (`src/lib/replay.js`). Chip and hero say "Replay". The sample is **generated** (60 s, resting 20-year-old man, CAL and baseline done), not a recording: swap in a real `START` capture when there is one. No 10× yet.
 - [ ] Record 2–3 real sessions with the team: 5 min baseline, 12 min hard work, 10 min recovery. Keep the best one in `demo/`.
-  - **Run `CAL` first** (build guide P6). `ID` must say "thermistor calibration: yes"; until then the skin checks are off and "Cannot estimate" can't fire on skin.
+  - **Run `CAL` first.** `ID` must say "thermistor calibration: yes"; until then the skin checks are off and "Cannot estimate" can't fire on skin.
   - Pick hard work whose step rate is far from the heart rate: step-ups around 100/min, or cycling. Running puts cadence and heart rate both near 160, the case where pulse sensors are easiest to fool.
 - [ ] Bluetooth drop: the app shows "Disconnected · reconnecting", keeps history, resumes.
   - The software was built in Phase 4 ("Reconnecting…" chip, Offline hero, history kept, auto-reconnect) and tested against a fake device. Tick this once a real drop has been tested: walk out of range, or unplug the power bank, then come back.
@@ -232,9 +246,12 @@ The device sends one 20-byte frame a second over BLE (`docs/APP_INTERFACE.md`). 
 
 - [ ] "About this data" panel: PROSPIE citation and licence, 37 people, chest heart rate, leave-one-subject-out, what the ± means.
 - [ ] Limits stated in the app and slides: calibrated on chest heart rate, not pulse sensors; estimate lags true core (give the measured lag); not a medical device.
-- [ ] Privacy: data stays on the device and laptop, nothing uploaded; supervisor sees alerts only. Check the webapp sends nothing anywhere except the optional weather lookup.
+- [ ] Privacy: data stays on the device and laptop, nothing uploaded; supervisor sees alerts only. Check the webapp sends nothing anywhere except the optional weather lookup and the Emergency help chat (only what the user types, to Anthropic).
+- [x] **Emergency help chat** (Oct 24): a button bottom-right on every view (on Personal, the bottom-right of the phone column, and the panel opens inside it) opens a heat-illness first-aid chat with Claude (`src/lib/assistant.js`, `src/views/HelpChat.js`). The 911 call bar and five first-aid steps are static text, so they show with no key or no internet. Starter taps ("They collapsed or seem confused", …), streaming replies, "New chat" clears without a reload. No device data is sent; the key is pasted into the panel and kept in memory only. Model `claude-sonnet-5-5`, low effort, no up-front thinking; retries once without those settings on HTTP 400. Checked in headless Chrome at 1280 and 390 px against a faked API stream.
+  - [ ] Paste a real key on the presenting laptop and run one conversation before going on stage: not yet tested against the real API.
+  - [ ] Have someone with first-aid training read the system prompt and the static steps.
 - [ ] Fairness: show the men vs women result honestly, whatever it is.
-- [ ] Docs: README, BOM, BUILD_PLAN describe v2 (HANDOFF, the build guides and the Kiro steering file were brought up to v2.1 on Oct 24; `BOM.md` is marked frozen in the steering file, so decide before editing it); remove synthetic claims ("26%", "16 participants", "coverage verified"); soften SCIENCE.md "skin falls".
+- [ ] Docs: README, BOM, BUILD_PLAN describe v2 (HANDOFF and the Kiro steering file were brought up to v2.1 on Oct 24; `BOM.md` is marked frozen in the steering file, so decide before editing it); remove synthetic claims ("26%", "16 participants", "coverage verified"); soften SCIENCE.md "skin falls".
 - [ ] Break schedule: pick a cited source (TB MED 507 or NIOSH 2016-106) or label 20/5 and 250 ml as placeholders on screen.
 
 ## Phase 7 · Freeze and present (Sun morning)
@@ -244,7 +261,7 @@ The device sends one 20-byte frame a second over BLE (`docs/APP_INTERFACE.md`). 
 - [ ] Backup video of the full demo; the replay file loaded and tested on the presenting laptop.
 - [ ] Rehearse twice, once with someone new; time it.
 - [ ] Presenting laptop: Chrome, Bluetooth on, webapp served locally, browser zoom set for the projector, notifications off.
-- [ ] Demo unit: `ID` shows firmware v2.2 and "thermistor calibration: yes". If not, run `CAL` (P6) before going on stage.
+- [ ] Demo unit: `ID` shows firmware v2.3 and "thermistor calibration: yes". If not, run `CAL` (P6) before going on stage.
 
 ## Hardware checkpoints the software depends on
 

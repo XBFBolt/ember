@@ -50,6 +50,7 @@
   } from './src/lib/device.js';
   import { startWeatherWithGeolocation }    from './src/lib/weather.js';
   import { toast }                          from './src/lib/toast.js';
+  import { mountHelpChat }                  from './src/views/HelpChat.js';
 
   // ── view router ─────────────────────────────────────────────────────
   const VIEWS = {
@@ -70,6 +71,7 @@
       }
     });
     if (_unmountFn) { _unmountFn(); _unmountFn = null; }
+    document.body.dataset.view = name;   // lets CSS place the help button per view
     const mountFn = VIEWS[name];
     if (mountFn) _unmountFn = mountFn(container);
   }
@@ -176,6 +178,7 @@
   startWeatherWithGeolocation();
   startDemo();
   switchView(viewFromUrl());
+  mountHelpChat();   // "Emergency help" button on every view
 </script>
 
 </body>

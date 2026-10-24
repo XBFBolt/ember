@@ -14,10 +14,10 @@
 
   90% nominal interval coverage:
     Kalman posterior:      34.3%  (mean width 0.34 °C)
-    Conformal calibrated:  89.7%  (mean width 1.34 °C)
+    Conformal calibrated:  89.2%  (mean width 0.99 °C)
 
   Headline: Kalman's "90%" interval covered 34.3% of true values.
-            Conformal's 90% interval covered 89.7%.
+            Conformal's 90% interval covered 89.2%.
 
 ====================================================================
  2. COVERAGE BY TRUE TEMPERATURE BAND
@@ -25,10 +25,10 @@
 
                   Band      n   Kalman  Conformal
   ------------------------------------------------
-        normal (<37.5)   3949    0.357      0.981
-      warm (37.5-38.0)   4435    0.404      0.953
-     watch (38.0-38.5)   3783    0.309      0.856
-       act now (≥38.5)   1874    0.242      0.669  <- under 85%
+        normal (<37.5)   3949    0.357      0.890
+      warm (37.5-38.0)   4435    0.404      0.956
+     watch (38.0-38.5)   3783    0.309      0.907
+       act now (≥38.5)   1874    0.242      0.712  <- under 85%
 
   The Kalman interval fails most where it matters most: at high core temps.
   Conformal is calibrated by PREDICTED temperature, so coverage conditional
@@ -42,23 +42,23 @@
   73 trials where true core reached 38.5°C
 
   Watch (estimate >= 38.0°C):
-    already on at that minute:  47 / 73 (64%)   [on beforehand: 45]
-      had been on for: median 13 min (IQR 6-21)
-    came on later:              21 / 73, median 14 min late, worst 65 min
-    never came on:              5 / 73 (7%)
-    lag (0 if already on):      median 0 min, worst 65 min (among 68 that fired)
-    [secondary] first on anywhere in trial: median -9 min relative to true 38.5
+    already on at that minute:  65 / 73 (89%)   [on beforehand: 61]
+      had been on for: median 12 min (IQR 5-19)
+    came on later:              8 / 73, median 8 min late, worst 41 min
+    never came on:              0 / 73 (0%)
+    lag (0 if already on):      median 0 min, worst 41 min (among 73 that fired)
+    [secondary] first on anywhere in trial: median -12 min relative to true 38.5
 
   Act now (estimate >= 38.5°C):
-    already on at that minute:  18 / 73 (25%)   [on beforehand: 17]
-      had been on for: median 8 min (IQR 5-11)
-    came on later:              21 / 73, median 41 min late, worst 63 min
-    never came on:              34 / 73 (47%)
-    lag (0 if already on):      median 1 min, worst 63 min (among 39 that fired)
-    [secondary] first on anywhere in trial: median +1 min relative to true 38.5
+    already on at that minute:  17 / 73 (23%)   [on beforehand: 16]
+      had been on for: median 4 min (IQR 2-11)
+    came on later:              29 / 73, median 15 min late, worst 62 min
+    never came on:              27 / 73 (37%)
+    lag (0 if already on):      median 4 min, worst 62 min (among 46 that fired)
+    [secondary] first on anywhere in trial: median +4 min relative to true 38.5
 
-  Watch came on but Act now never did: 29 / 73 (40%)
-  Neither alert ever came on:          5 / 73 (7%)
+  Watch came on but Act now never did: 27 / 73 (37%)
+  Neither alert ever came on:          0 / 73 (0%)
 
   Watch carries the safety load: it is already on in most trials when
   true core reaches 38.5, while Act now is usually late or never fires.
@@ -68,23 +68,23 @@
 ====================================================================
 
   F:  n_subjects=15,  n_samples=5574
-    bias: -0.087 °C
-    RMSE: 0.418 °C
-    90% conformal coverage: 88.1%
+    bias: +0.025 °C
+    RMSE: 0.310 °C
+    90% conformal coverage: 90.4%
 
   M:  n_subjects=20,  n_samples=7963
-    bias: -0.182 °C
-    RMSE: 0.400 °C
-    90% conformal coverage: 90.1%
+    bias: -0.034 °C
+    RMSE: 0.325 °C
+    90% conformal coverage: 88.4%
 
   Bootstrap analysis of BIAS difference (5000 resamples of subjects):
-    M minus F: -0.095 °C
-    95% CI: [-0.262, +0.093]  (includes zero)
-    P(difference > 0): 0.152
+    M minus F: -0.059 °C
+    95% CI: [-0.158, +0.052]  (includes zero)
+    P(difference > 0): 0.138
 
   Bootstrap analysis of RMSE difference (for comparison):
-    M minus F: -0.018 °C
-    95% CI: [-0.126, +0.086]  (includes zero)
+    M minus F: +0.015 °C
+    95% CI: [-0.051, +0.072]  (includes zero)
 
   Note: Bias is the primary metric. A systematic offset between groups
         moves bias substantially but barely affects RMSE (which is dominated
@@ -99,28 +99,51 @@
 
   Rising:
     Kalman 90%:     30.5%
-    Conformal 90%:  84.9%
+    Conformal 90%:  86.1%
 
   Steady:
     Kalman 90%:     32.7%
-    Conformal 90%:  90.8%
-
-  Rising coverage is under 85%: consider stratifying the calibration
-  by rising/steady as well as by predicted temperature.
+    Conformal 90%:  89.8%
 
 ====================================================================
  6. PULSE SENSORS: does the chest calibration hold for optical HR?
 ====================================================================
 
   Finger PPG appears only in conditions [1, 2, 3]. Chest table, leave-one-subject-out:
-  finger pulse trials                 28 trials  bias -0.41  coverage 74.4%  HR missing 80%
-  chest trials, same conditions       25 trials  bias -0.36  coverage 77.9%  HR missing 79%
+  finger pulse trials                 28 trials  bias -0.12  coverage 85.4%  HR missing 80%
+  chest trials, same conditions       25 trials  bias -0.11  coverage 79.7%  HR missing 79%
 
   Most of the gap is the conditions (heart rate missing in most
   minutes in both groups), not the sensor. Same conditions, pulse vs
-  chest differ by -0.05 °C bias and -3.5 points of coverage.
+  chest differ by -0.01 °C bias and +5.6 points of coverage.
   The filter only sees heart rate: if Ember's pulse sensors report the
   same heart rate as a chest strap, the chest calibration applies.
+
+====================================================================
+ 7. LEARNED CORRECTION: filter alone vs Ember 2.3
+====================================================================
+
+                                    filter alone   Ember 2.3
+  error (RMSE, °C)                         0.405       0.318
+  bias (°C)                               -0.144      -0.009
+  90% coverage                             89.7%       89.2%
+  mean ± (°C)                               0.67        0.49
+  coverage at true ≥38.5                   66.9%       71.2%
+  Watch on at true 38.5                       47          65
+  Watch never fired                            5           0
+  Act now on at true 38.5                     18          17
+  Act now never fired                         34          27
+  Act now false alarm trials                  13          13
+
+  Alert rows: of 73 trials that reached true 38.5; false alarms: of 55 that did not.
+
+  Better for 31 of 37 people. RMSE change -0.087 °C, 95% CI over people [-0.125, -0.047].
+  Largest loss for one person: +0.237 °C RMSE.
+  The correction was on for 98.3% of scored minutes
+  (off before a heart rate is seen or without a baseline).
+
+  Caveat: the model was chosen among seven variants on this data
+  (learned_correction.py), so these gains are slightly optimistic.
 
 
 Wrote judges_results.json

@@ -41,6 +41,11 @@ the model the PROSPIE protocol, not physiology).
 Caveat to state with any result: seven variants are compared on the same
 data, so the best one's numbers are slightly optimistic.
 
+This is the EXPERIMENT that chose variant C. The shipped model is
+correction.py: the same idea with features defined exactly as the firmware
+computes them, no imputation, and the correction off without a baseline.
+Its numbers are in judges_results.txt (section 7) and differ slightly.
+
 Run:
     python3 learned_correction.py --data "Prospie dataset_open access V3.xlsx" \
         | tee learned_correction_results.txt

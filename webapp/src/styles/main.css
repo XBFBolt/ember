@@ -43,6 +43,9 @@
   --radius-md: 14px;
   --radius-sm: 10px;
   --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Width of the Personal view's phone column (the help button lines up with it) */
+  --phone-w: 430px;
 }
 
 /* Status variables. Put one of these classes on any element and
@@ -165,7 +168,7 @@ button { font-family: inherit; cursor: pointer; }
 .toast.is-on { opacity: 1; transform: translate(-50%, 0); }
 
 /* ========================================================= PERSONAL */
-.personal { max-width: 430px; margin: 0 auto; min-height: calc(100vh - 56px); display: flex; flex-direction: column; }
+.personal { max-width: var(--phone-w); margin: 0 auto; min-height: calc(100vh - 56px); display: flex; flex-direction: column; }
 
 .hero { background: var(--s-bg); color: var(--s-ink); padding: 18px 22px 14px; display: flex; flex-direction: column; gap: 4px; }
 .hero__top { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 600; }
@@ -401,3 +404,111 @@ ul.log, ul.plain { list-style: none; margin: 0; padding: 0; }
   .conn__chip #conn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .tabs a { padding: 8px 9px; font-size: 13px; }
 }
+
+/* ==================================================== EMERGENCY HELP CHAT */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.help-fab {
+  position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 30;
+  display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 16px 0 10px;
+  border-radius: 999px; border: 2px solid #fff; background: var(--ink); color: #fff;
+  font-size: 14px; font-weight: 700; box-shadow: 0 6px 20px rgba(11,27,43,0.28);
+}
+.help-fab:focus-visible { outline: 3px solid var(--watch); outline-offset: 2px; }
+.help-fab__icon {
+  width: 22px; height: 22px; border-radius: 50%; background: var(--act); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+}
+
+/* Bottom-right panel on a laptop, full screen on a phone */
+.help-chat {
+  width: min(400px, calc(100vw - 32px)); height: min(680px, calc(100vh - 32px));
+  max-width: none; max-height: none; inset: auto 16px 16px auto; margin: 0;
+  padding: 0; border: 0; border-radius: 16px; overflow: hidden;
+  background: var(--surface); color: var(--ink); box-shadow: 0 16px 40px rgba(11,27,43,0.3);
+}
+.help-chat[open] { display: flex; flex-direction: column; }
+.help-chat::backdrop { background: rgba(11,27,43,0.35); }
+
+.help-chat__head {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+.help-chat__head h2 { font-size: 17px; font-weight: 700; }
+.help-chat__head-btns { display: flex; gap: 6px; }
+.help-chat .btn:focus-visible { outline: 3px solid var(--watch); outline-offset: 2px; }
+
+.help-chat__call { background: var(--s-bg); color: var(--s-ink); padding: 12px 16px; display: flex; align-items: center; gap: 12px; }
+.help-chat__call p { flex: 1; font-size: 14px; line-height: 1.4; }
+.help-chat__call-btn {
+  flex: none; display: inline-flex; align-items: center; height: 44px;
+  background: #fff; color: var(--act); font-weight: 800; text-decoration: none;
+}
+.help-chat__call-btn:hover { color: var(--act); }
+.help-chat__call-btn:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+
+.help-chat__scroll {
+  flex: 1; min-height: 0; overflow-y: auto; background: var(--bg);
+  padding: 12px 16px; display: flex; flex-direction: column; gap: 12px;
+}
+.help-chat__steps { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+.help-chat__steps summary { font-size: 14px; font-weight: 700; cursor: pointer; }
+.help-chat__steps ol { margin: 8px 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 14px; line-height: 1.45; }
+.help-chat__steps p { font-size: 13px; line-height: 1.45; color: var(--body); }
+
+.help-chat__log { display: flex; flex-direction: column; gap: 8px; }
+.msg {
+  max-width: 88%; padding: 9px 12px; border-radius: 14px;
+  font-size: 15px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.msg--bot { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+.msg--user { align-self: flex-end; background: var(--ink); color: #fff; border-bottom-right-radius: 4px; }
+.msg--note { align-self: stretch; max-width: none; background: var(--watch-tint); color: var(--watch-text); font-size: 13px; font-weight: 600; border-radius: 10px; }
+.msg.is-waiting { color: var(--muted); }
+
+.help-chat__starters { display: flex; flex-wrap: wrap; gap: 6px; }
+.help-chat__starters button {
+  min-height: 36px; padding: 6px 12px; border-radius: 999px; text-align: left;
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink);
+  font-size: 13px; font-weight: 600;
+}
+.help-chat__starters button:focus-visible { outline: 3px solid var(--watch); outline-offset: 2px; }
+
+.help-chat__form, .help-chat__key { padding: 10px 16px 0; border-top: 1px solid var(--border); }
+.help-chat__form { display: flex; gap: 8px; align-items: flex-end; }
+.help-chat__form textarea {
+  flex: 1; min-width: 0; min-height: 44px; max-height: 120px; overflow-y: auto; resize: none;
+  padding: 11px 12px; border: 1px solid var(--border-strong); border-radius: 12px;
+  font: inherit; font-size: 15px; line-height: 1.4; color: var(--ink);
+}
+.help-chat__form .btn { height: 44px; }
+.help-chat__key { display: flex; flex-direction: column; gap: 6px; }
+.help-chat__key p { font-size: 13px; line-height: 1.4; color: var(--body); }
+.help-chat__key label { font-size: 12px; font-weight: 700; }
+.help-chat__row { display: flex; gap: 8px; }
+.help-chat__key input {
+  flex: 1; min-width: 0; height: 36px; padding: 0 10px; font: inherit; font-size: 14px;
+  border: 1px solid var(--border-strong); border-radius: 8px; color: var(--ink);
+}
+.help-chat__key .help-chat__keynote { font-size: 12px; color: var(--muted); }
+.help-chat__form textarea:focus-visible, .help-chat__key input:focus-visible { outline: 3px solid var(--watch); outline-offset: 1px; }
+.help-chat__fine { font-size: 11px; line-height: 1.4; color: var(--muted); padding: 8px 16px 12px; }
+
+@media (max-width: 480px) {
+  .help-chat { inset: 0; width: auto; height: auto; border-radius: 0; }
+}
+
+/* Personal view: the button and the panel sit inside the phone column, not at
+   the edge of a wide screen. On a real phone the column is the screen, so the
+   max() falls back to 16px and the panel stays full screen (rule above). */
+body[data-view="personal"] .help-fab { right: max(16px, calc((100% - var(--phone-w)) / 2 + 16px)); }
+@media (min-width: 481px) {
+  body[data-view="personal"] .help-chat {
+    width: calc(var(--phone-w) - 32px); height: min(680px, calc(100vh - 96px));
+    inset: auto calc((100% - var(--phone-w)) / 2 + 16px) 16px auto;
+  }
+}
+
+/* Room for the Emergency help button, so it never covers the last line */
+.page { padding-bottom: 88px; }
+.personal__body { padding-bottom: 76px; }

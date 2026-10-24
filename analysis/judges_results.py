@@ -8,9 +8,12 @@ This produces:
   4. Sex bias with bootstrap confidence intervals
   5. Optional: coverage during rising vs steady phases
   6. Pulse sensors: the chest table applied to PROSPIE's finger-PPG trials
+  7. The learned correction (firmware 2.3): filter alone vs shipped
 
 Input is the leave-one-subject-out output of evaluate.py (chest heart-rate
 sensors, 6 conformal strata: the same calibration as conformal_table.h).
+"Ember" everywhere is the shipped estimate (filter + learned correction);
+the Kalman interval is always the filter's own estimate and variance.
 
 Run:
     python3 evaluate.py --data "Prospie dataset_open access V3.xlsx" --prefix ember_chest
@@ -57,7 +60,8 @@ def coverage_comparison(res):
     print("=" * 68)
 
     # 90% intervals
-    glo, ghi = gaussian_interval(res["pred"], res["var"], 0.90)
+    # The Kalman interval is the filter's own: its estimate, its variance.
+    glo, ghi = gaussian_interval(res["kalman_pred"], res["var"], 0.90)
     kalman_cov = coverage(res["core_c"], glo, ghi)
     conformal_cov = coverage(res["core_c"], res["c_lo_0.9"], res["c_hi_0.9"])
 
@@ -95,7 +99,7 @@ def coverage_by_band(res):
             continue
 
         sub = res[mask]
-        glo, ghi = gaussian_interval(sub["pred"], sub["var"], 0.90)
+        glo, ghi = gaussian_interval(sub["kalman_pred"], sub["var"], 0.90)
         k_cov = coverage(sub["core_c"], glo, ghi)
         c_cov = coverage(sub["core_c"], sub["c_lo_0.9"], sub["c_hi_0.9"])
 
@@ -333,7 +337,7 @@ def rising_vs_steady_coverage(res):
 
     results = {}
     for label, sub in [("rising", rising), ("steady", steady)]:
-        glo, ghi = gaussian_interval(sub["pred"], sub["var"], 0.90)
+        glo, ghi = gaussian_interval(sub["kalman_pred"], sub["var"], 0.90)
         k_cov = coverage(sub["core_c"], glo, ghi)
         c_cov = coverage(sub["core_c"], sub["c_lo_0.9"], sub["c_hi_0.9"])
 
@@ -426,6 +430,82 @@ def pulse_sensor_check(n_strata=6, level=0.90):
     return out
 
 
+def filter_alone(res):
+    """The same rows as firmware 2.2 would have shown them: no correction."""
+    return res.assign(pred=res["kalman_pred"], **{"c_lo_0.9": res["c_lo_raw_0.9"],
+                                                  "c_hi_0.9": res["c_hi_raw_0.9"]})
+
+
+def _scorecard(r):
+    err = r["pred"] - r["core_c"]
+    lo, hi = r["c_lo_0.9"].to_numpy(), r["c_hi_0.9"].to_numpy()
+    hot = (r["core_c"] >= ACT_NOW_C).to_numpy()
+    t = alert_timing(r)
+    per = r.groupby(["subject", "condition"]).agg(tmax=("core_c", "max"), emax=("pred", "max"))
+    calm = per[per["tmax"] < ACT_NOW_C]
+    return {
+        "rmse": float(np.sqrt(np.mean(err ** 2))),
+        "bias": float(err.mean()),
+        "coverage_90": coverage(r["core_c"], lo, hi),
+        "mean_half": float(np.mean(hi - lo) / 2),
+        "coverage_hot": coverage(r["core_c"][hot], lo[hot], hi[hot]),
+        "watch_on": int(t["watch_on"].sum()), "watch_never": int(t["watch_lag"].isna().sum()),
+        "act_on": int(t["act_on"].sum()), "act_never": int(t["act_lag"].isna().sum()),
+        "act_false_trials": int((calm["emax"] >= ACT_NOW_C).sum()),
+        "danger_trials": int(len(t)), "calm_trials": int(len(calm)),
+    }
+
+
+def correction_before_after(res):
+    """7. The learned correction (firmware 2.3): filter alone vs shipped."""
+    print("\n" + "=" * 68)
+    print(" 7. LEARNED CORRECTION: filter alone vs Ember 2.3")
+    print("=" * 68)
+    if not res["corr_active"].any():
+        print("  Predictions were made without the correction - skipped.")
+        return None
+
+    b, a = _scorecard(filter_alone(res)), _scorecard(res)
+    rows = [("error (RMSE, °C)", "rmse", "{:.3f}"), ("bias (°C)", "bias", "{:+.3f}"),
+            ("90% coverage", "coverage_90", "{:.1%}"), ("mean ± (°C)", "mean_half", "{:.2f}"),
+            (f"coverage at true ≥{ACT_NOW_C}", "coverage_hot", "{:.1%}"),
+            (f"Watch on at true {ACT_NOW_C}", "watch_on", "{:d}"),
+            ("Watch never fired", "watch_never", "{:d}"),
+            (f"Act now on at true {ACT_NOW_C}", "act_on", "{:d}"),
+            ("Act now never fired", "act_never", "{:d}"),
+            ("Act now false alarm trials", "act_false_trials", "{:d}")]
+    print(f"\n  {'':32s} {'filter alone':>13s} {'Ember 2.3':>11s}")
+    for label, k, fmt in rows:
+        print(f"  {label:32s} {fmt.format(b[k]):>13s} {fmt.format(a[k]):>11s}")
+    print(f"\n  Alert rows: of {a['danger_trials']} trials that reached true {ACT_NOW_C}; "
+          f"false alarms: of {a['calm_trials']} that did not.")
+
+    # Per person: is it better for most people, or a few?
+    e_b = (res["kalman_pred"] - res["core_c"]) ** 2
+    e_a = (res["pred"] - res["core_c"]) ** 2
+    pb = e_b.groupby(res["subject"]).mean() ** 0.5
+    pa = e_a.groupby(res["subject"]).mean() ** 0.5
+    improved = int((pa < pb).sum())
+    sb, sa, n = e_b.groupby(res["subject"]).sum(), e_a.groupby(res["subject"]).sum(), e_b.groupby(res["subject"]).size()
+    rng = np.random.default_rng(0)
+    ids = pb.index.to_numpy()
+    d = []
+    for _ in range(5000):
+        k = rng.choice(ids, len(ids))
+        d.append(np.sqrt(sa[k].sum() / n[k].sum()) - np.sqrt(sb[k].sum() / n[k].sum()))
+    ci = [float(np.percentile(d, 2.5)), float(np.percentile(d, 97.5))]
+    worst = float((pa - pb).max())
+    print(f"\n  Better for {improved} of {len(pb)} people. RMSE change {a['rmse'] - b['rmse']:+.3f} °C, "
+          f"95% CI over people [{ci[0]:+.3f}, {ci[1]:+.3f}].")
+    print(f"  Largest loss for one person: {worst:+.3f} °C RMSE.")
+    print(f"  The correction was on for {res['corr_active'].mean():.1%} of scored minutes")
+    print("  (off before a heart rate is seen or without a baseline).")
+    print("\n  Caveat: the model was chosen among seven variants on this data")
+    print("  (learned_correction.py), so these gains are slightly optimistic.")
+    return {"filter_alone": b, "ember": a, "people_improved": improved,
+            "people": int(len(pb)), "rmse_change_ci": ci, "worst_person_change": worst}
+
+
 def main():
     print("=" * 68)
     print(" EMBER PHASE 2: RESULTS FOR JUDGES")
@@ -452,6 +532,7 @@ def main():
         summary["rising_vs_steady"] = None
 
     summary["pulse_sensor_check"] = pulse_sensor_check()
+    summary["correction"] = correction_before_after(res)
 
     out_file = "judges_results.json"
     with open(out_file, "w") as fh:

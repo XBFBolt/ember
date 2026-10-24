@@ -7,6 +7,7 @@
 
 import { THRESHOLDS, fmtC } from '../lib/datastore.js';
 import { forecastRange, formatRange } from '../lib/estimator.js';
+import { conformalHalfWidth } from '../lib/conformal_table.js';
 import { toast } from '../lib/toast.js';
 
 const W = fmtC(THRESHOLDS.WATCH_C);
@@ -22,19 +23,21 @@ function _ctToStatus(name, ct) {
   return 'ok';
 }
 
+// Every player has a baseline ("12 baselines captured"), so each ± comes from
+// the corrected table, the one the device uses once the correction is on.
 const _PLAYERS_RAW = [
-  { name: 'J. Okafor', num: 22, ct: 38.8, half: 0.92, trend: '↑ 0.4° / 10 min', note: 'Rest 15+ min' },
-  { name: 'T. Brooks', num: 54, ct: 38.6, half: 0.92, trend: '↑ 0.3° / 10 min', note: 'Rest 15+ min' },
-  { name: 'S. Kim',    num: 31, ct: null, half: null,  trend: 'High HR, no motion', note: 'Check in person' },
-  { name: 'M. Alvarez',num: 7,  ct: 38.6, half: 0.92, trend: '↑ 0.3° / 10 min', note: 'Rest 15+ min' },
-  { name: 'E. Vega',   num: 60, ct: 38.1, half: 0.70, trend: '↑ 0.4° / 10 min', rate: 0.4 },
-  { name: 'D. Price',  num: 88, ct: 38.0, half: 0.68, trend: '↑ 0.2° / 10 min', rate: 0.2 },
-  { name: 'A. Nwosu',  num: 12, ct: 37.8, half: 0.68, trend: '→ steady',          note: 'Break with team' },
-  { name: 'R. Patel',  num: 3,  ct: 37.7, half: 0.62, trend: '↓ falling',         note: 'Break with team' },
-  { name: 'C. Moreau', num: 45, ct: 37.6, half: 0.62, trend: '→ steady',          note: 'Break with team' },
-  { name: 'L. Grant',  num: 19, ct: 37.5, half: 0.62, trend: '→ steady',          note: 'Break with team' },
-  { name: 'B. Walsh',  num: 9,  ct: 37.4, half: 0.62, trend: '→ steady',          note: 'Break with team' },
-  { name: 'H. Osei',   num: 24, ct: 37.2, half: 0.59, trend: '→ steady',          note: 'Seated control', control: true },
+  { name: 'J. Okafor', num: 22, ct: 38.8, trend: '↑ 0.4° / 10 min', note: 'Rest 15+ min' },
+  { name: 'T. Brooks', num: 54, ct: 38.6, trend: '↑ 0.3° / 10 min', note: 'Rest 15+ min' },
+  { name: 'S. Kim',    num: 31, ct: null, trend: 'High HR, no motion', note: 'Check in person' },
+  { name: 'M. Alvarez',num: 7,  ct: 38.6, trend: '↑ 0.3° / 10 min', note: 'Rest 15+ min' },
+  { name: 'E. Vega',   num: 60, ct: 38.1, trend: '↑ 0.4° / 10 min', rate: 0.4 },
+  { name: 'D. Price',  num: 88, ct: 38.0, trend: '↑ 0.2° / 10 min', rate: 0.2 },
+  { name: 'A. Nwosu',  num: 12, ct: 37.8, trend: '→ steady',          note: 'Break with team' },
+  { name: 'R. Patel',  num: 3,  ct: 37.7, trend: '↓ falling',         note: 'Break with team' },
+  { name: 'C. Moreau', num: 45, ct: 37.6, trend: '→ steady',          note: 'Break with team' },
+  { name: 'L. Grant',  num: 19, ct: 37.5, trend: '→ steady',          note: 'Break with team' },
+  { name: 'B. Walsh',  num: 9,  ct: 37.4, trend: '→ steady',          note: 'Break with team' },
+  { name: 'H. Osei',   num: 24, ct: 37.2, trend: '→ steady',          note: 'Seated control', control: true },
 ];
 
 // Watch notes use the same forecast range as the Personal view.
@@ -46,15 +49,21 @@ function _note(p, status) {
 
 const PLAYERS = _PLAYERS_RAW.map(p => {
   const status = _ctToStatus(p.name, p.ct);
-  return { ...p, status, note: _note(p, status) };
+  const half = p.ct === null ? null : conformalHalfWidth(p.ct);
+  return { ...p, half, status, note: _note(p, status) };
 });
 const WATCH_NAMES = PLAYERS.filter(p => p.status === 'watch').map(p => p.name);
 
+const _reading = name => {
+  const p = PLAYERS.find(x => x.name === name);
+  return `${p.ct.toFixed(1)} ± ${p.half.toFixed(1)}°C`;
+};
+
 const LOG = [
   { time: '4:44 PM', text: 'S. Kim: cannot estimate (high heart rate while still)' },
-  { time: '4:42 PM', text: 'J. Okafor reached Act now (38.8 ± 0.9°C, rising)' },
-  { time: '4:40 PM', text: 'M. Alvarez reached Act now (38.6 ± 0.9°C, rising)' },
-  { time: '4:38 PM', text: 'T. Brooks reached Act now (38.6 ± 0.9°C)' },
+  { time: '4:42 PM', text: `J. Okafor reached Act now (${_reading('J. Okafor')}, rising)` },
+  { time: '4:40 PM', text: `M. Alvarez reached Act now (${_reading('M. Alvarez')}, rising)` },
+  { time: '4:38 PM', text: `T. Brooks reached Act now (${_reading('T. Brooks')})` },
   { time: '4:20 PM', text: 'Team water break, 5 min' },
   { time: '4:05 PM', text: 'Practice started · 12 baselines captured' },
 ];

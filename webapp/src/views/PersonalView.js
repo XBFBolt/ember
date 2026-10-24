@@ -14,6 +14,9 @@ import {
   trendRate, formatTrend, forecastRange, formatRange, recommendedAction,
   CONF_EDGES, CONF_HALF, CONF_SYNTHETIC, CONF_MEASURED_COV,
 } from '../lib/estimator.js';
+import {
+  CONF_RAW_HALF, CONF_MEASURED_COV_HOT, KALMAN_MEASURED_COV,
+} from '../lib/conformal_table.js';
 import { toast } from '../lib/toast.js';
 import { sendCommand } from '../lib/device.js';
 import { FLAG } from '../lib/frame.js';
@@ -588,10 +591,11 @@ function _template() {
       <button type="button" class="btn btn--secondary btn-sm" data-action="close-dialog">Close</button>
     </div>
     <p>The ± is a 90% range: it is sized so your real core temperature should fall inside it about 9 times out of 10. It comes from comparing EMB.R's estimate with a core thermometer in 37 people, not from the filter's own guess, so it is honest about how wrong EMB.R can be.</p>
-    <p><strong>Measured coverage</strong>: tested on 37 people it had never seen (PROSPIE V3, chest heart-rate straps, 14,041 minutes), the true value was inside EMB.R's range <strong>${(CONF_MEASURED_COV * 100).toFixed(1)}%</strong> of the time. The filter's own "90%" range held only <strong>34%</strong> of the time.</p>
-    <p>It holds less well when you are very hot. When true core was ${fmtC(THRESHOLDS.ACT_NOW_C)} or more, the range held about 2 times in 3, because the estimate lags behind a fast rise. That is why Watch starts at ${fmtC(THRESHOLDS.WATCH_C)}.</p>
+    <p><strong>Measured coverage</strong>: tested on 37 people it had never seen (PROSPIE V3, chest heart-rate straps, 14,041 minutes), the true value was inside EMB.R's range <strong>${(CONF_MEASURED_COV * 100).toFixed(1)}%</strong> of the time. The filter's own "90%" range held only <strong>${Math.round(KALMAN_MEASURED_COV * 100)}%</strong> of the time.</p>
+    <p><strong>Learned correction</strong>: once your baseline is captured, EMB.R adjusts the filter's estimate using your heart rate compared with your own resting rate. The adjustment was learned from the same 37 people and checked on people it had not seen. It makes the estimate closer to the truth, so the ± is narrower: about ± ${Math.min(...CONF_HALF).toFixed(1)}–${Math.max(...CONF_HALF).toFixed(1)}° with your baseline, ± ${Math.min(...CONF_RAW_HALF).toFixed(1)}–${Math.max(...CONF_RAW_HALF).toFixed(1)}° before it.</p>
+    <p>It holds less well when you are very hot. When true core was ${fmtC(THRESHOLDS.ACT_NOW_C)} or more, the range held about ${Math.round(CONF_MEASURED_COV_HOT * 10)} times in 10, because the estimate still lags behind a fast rise. That is why Watch starts at ${fmtC(THRESHOLDS.WATCH_C)}.</p>
     <p>When the sensors disagree, EMB.R pauses the number. From ${fmtC(THRESHOLDS.WATCH_C)} up it always shows the number, marked Low confidence.</p>
-    <p>The ± depends on the estimate, from ± ${Math.min(...CONF_HALF).toFixed(1)}° to ± ${Math.max(...CONF_HALF).toFixed(1)}°:</p>
+    <p>With your baseline, the ± depends on the estimate:</p>
     <table class="sheet__table">
       <thead><tr><th>Estimate</th><th>Range</th></tr></thead>
       <tbody>${_confRows()}</tbody>

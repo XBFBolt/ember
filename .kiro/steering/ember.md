@@ -41,10 +41,8 @@ webapp/                  the app (below)
 design-export/           reference HTML/CSS/JS for the final design
 docs/
   APP_INTERFACE.md       the BLE contract: UUIDs, frame, flags, display rules
-  BUILD_GUIDE.md         text-only copy of the build guide
   BOM.md                 v1 parts list (Polar/OLED era). Frozen
   BUILD_PLAN.md, SCIENCE.md
-guide/                   team build guide: open_me.html, built from phases.html + template.html
 cad/                     enclosure (CadQuery source, STEP/STL)
 figures/                 judge figures
 TODO.md  HANDOFF.md  README.md
@@ -62,8 +60,10 @@ webapp/
   src/lib/estimator.js   trend and forecast; v1 filter mirror (5 s steps), not shown on screen
   src/lib/conformal_table.js  GENERATED together with conformal_table.h
   src/lib/weather.js     Open-Meteo ambient temperature + humidity
+  src/lib/assistant.js   Emergency help chat: Claude Messages API (streaming), system prompt, in-memory key
   src/lib/toast.js
   src/views/             PersonalView.js, CoachView.js, SupervisorView.js
+                         HelpChat.js: "Emergency help" button (every view) and its chat panel
   src/styles/main.css
 ```
 
@@ -212,6 +212,12 @@ only events (overheating alert, rest break taken, estimate unavailable), "I chec
 in" / "Call worker", and a "Who sees what" card. Optional later: the live wearer's
 Act now as one event, with no temperature.
 
+**Emergency help (every view).** A button bottom-right opens a heat-illness first-aid
+chat with Claude. The 911 call bar and the first-aid steps are static text in
+`HelpChat.js`, so they show with no key, no internet or a slow answer; the chat
+comes below them. It never sees device data. The system prompt (`assistant.js`)
+puts 911 and cooling first and says to act on symptoms, not on EMB.R's number.
+
 Design: Inter font, ink `#0B1B2B`, status colours above; reference in
 `design-export/`. Break and water schedule are placeholders (20 min on / 5 off,
 250 ml every 15 min) until a cited table is chosen.
@@ -227,8 +233,11 @@ Design: Inter font, ink `#0B1B2B`, status colours above; reference in
 - No login, accounts or tracking. One hardcoded device.
 - Data flows device → `datastore.js` → views. The only write back is a command to
   the device (`BASELINE`).
-- Outbound requests: Open-Meteo (latitude/longitude only) and Google Fonts (Inter).
-  Nothing else.
+- Outbound requests: Open-Meteo (latitude/longitude only), Google Fonts (Inter), and
+  the Anthropic API for the Emergency help chat (the system prompt and what the user
+  types; never heart rate, skin or core temp, location or name). Nothing else.
+- The Anthropic key is pasted into the chat panel and kept in memory only. Never put
+  a key in the repo or the page source.
 
 ---
 
@@ -239,6 +248,8 @@ Design: Inter font, ink `#0B1B2B`, status colours above; reference in
 - Charts are plain SVG drawn in the view. No chart library.
 - Web Bluetooth (Chrome) for the device; Web Serial kept for the bench.
 - Open-Meteo for weather, no key.
+- Claude (`claude-sonnet-5-5`, low effort, no up-front thinking) for the help chat,
+  called straight from the browser (`anthropic-dangerous-direct-browser-access`).
 
 ---
 
@@ -260,7 +271,7 @@ Design: Inter font, ink `#0B1B2B`, status colours above; reference in
 - **Do not remove the refusal logic.** It is the point of the project. It refuses
   only on signal doubts, never because the range is wide, and never at 38.0 °C or above.
 - Bump `FW_VERSION` in `ember.ino` when behaviour changes (2.2.2 now), so `ID` shows
-  which build is flashed, and update the expected `ID` output in the build guide.
+  which build is flashed.
 
 ---
 
@@ -280,9 +291,6 @@ From `ember/`:
   `node --test tests/test_frame.mjs tests/test_link.mjs`
 - Webapp: `node --check` every edited module, then test in a browser at 390 px and
   1280 px wide with the simulation running.
-- Build guide: edit `guide/phases.html` or `guide/template.html`, run
-  `python3 guide/build_guide.py` (rewrites `ember_build_guide.html` and
-  `open_me.html`), then mirror the change in `docs/BUILD_GUIDE.md`.
 
 Tick items off in `TODO.md` as they are done.
 
@@ -311,4 +319,4 @@ Tick items off in `TODO.md` as they are done.
 - Don't show heart rate, skin temp or core temp in the Supervisor view.
 - Don't hardcode threshold numbers in UI text.
 - Don't reuse flag bits 0x0010, 0x0100 or 0x0200.
-- Don't edit `docs/BOM.md` (the frozen v1 list; the v2 parts list is in the build guide).
+- Don't edit `docs/BOM.md` (the frozen v1 list).

@@ -14,6 +14,7 @@
  *   4. Heart rate       one pulse sensor -> a heart rate, or none
  *   5. Confounds        flags and the OK / CAUTION / REFUSE decision
  *   6. Packet           the 20-byte BLE frame the app decodes
+ *   7. Correction       the learned correction on top of ECTemp (2.3)
  *
  * Hardware v5 (firmware 2.2): one pulse sensor, two skin thermistors, one
  * air thermistor outside the strap, IMU. No SHT40, so no humidity.
@@ -25,6 +26,8 @@
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
+
+#include "conformal_table.h"   // GENERATED: conformal tables + correction coefficients
 
 namespace ember {
 
@@ -705,6 +708,98 @@ inline void encodeFrame(const Frame &f, uint8_t out[PACKET_LEN]) {
   out[17] = u8(f.activityG, 500.0f, 255);                 // 2 milli-g units
   out[18] = 0;                                            // reserved (was HR sensor A)
   out[19] = 0;                                            // reserved (was HR sensor B)
+}
+
+// =================================================================== 7
+// Learned correction (firmware 2.3).
+//
+// ECTemp uses one heart-rate curve for everyone and lags a fast rise. A
+// small linear model, fitted on PROSPIE against a rectal reference, adds a
+// correction to its estimate:
+//
+//   estimate = filter + clamp(CORR_INTERCEPT + CORR_COEF . x, +/- CORR_MAX_C)
+//   x = (ct, ct_d10, hr5, hr5_d10, hr_rest)
+//
+//   ct       the filter's estimate this minute
+//   ct_d10   its change over the last 10 minutes (oldest kept, if fewer)
+//   hr5      mean of the last 5 minutes' heart rates, carried over gaps
+//   hr5_d10  its change over the last 10 minutes (oldest kept, if fewer)
+//   hr_rest  hr5 minus the resting heart rate from BASELINE
+//
+// Mirrors analysis/correction.py minute for minute; the golden vectors in
+// tests/correction_vectors.h check that. The coefficients and both tables
+// are GENERATED into conformal_table.h - never edit them by hand.
+//
+// OFF until a baseline is captured and a heart rate has been seen. Off,
+// the device shows the filter's own estimate with the CONF_RAW table:
+// exactly what firmware 2.2 shipped.
+
+struct Lagged {
+  static const int N = CORR_LAG_MIN + 1;
+  float v[N];
+  int n = 0, head = 0;
+  void reset() { n = 0; head = 0; }
+  void push(float x) { v[head] = x; head = (head + 1) % N; if (n < N) n++; }
+  // The value CORR_LAG_MIN pushes ago, or the oldest kept if fewer.
+  float lagged() const {
+    int k = n - 1;
+    if (k > CORR_LAG_MIN) k = CORR_LAG_MIN;
+    return v[(head - 1 - k + 2 * N) % N];
+  }
+};
+
+struct Correction {
+  float hrWin[CORR_HR_WIN_MIN];
+  int hrWinN = 0, hrWinHead = 0;
+  float hr5 = NAN;
+  Lagged ctHist, hr5Hist;
+  float corr = 0.0f;
+  bool on = false;
+
+  // A new filter start (BASELINE succeeded): forget the history.
+  void reset() {
+    hrWinN = 0; hrWinHead = 0; hr5 = NAN;
+    ctHist.reset(); hr5Hist.reset();
+    corr = 0.0f; on = false;
+  }
+
+  // Once a minute, after the filter's step. minuteHr: that minute's mean
+  // heart rate, NAN if the filter coasted. ct: the filter's clamped
+  // estimate. restHr: NAN without a baseline.
+  void step(float minuteHr, float ct, float restHr) {
+    hrWin[hrWinHead] = minuteHr;
+    hrWinHead = (hrWinHead + 1) % CORR_HR_WIN_MIN;
+    if (hrWinN < CORR_HR_WIN_MIN) hrWinN++;
+    float s = 0.0f; int k = 0;
+    for (int i = 0; i < hrWinN; i++) if (!isnan(hrWin[i])) { s += hrWin[i]; k++; }
+    if (k > 0) hr5 = s / k;                   // otherwise carried over
+
+    ctHist.push(ct);
+    on = false; corr = 0.0f;
+    if (isnan(hr5)) return;
+    hr5Hist.push(hr5);
+    if (isnan(restHr)) return;
+
+    float x[CORR_N_FEATURES] = {
+      ct, ct - ctHist.lagged(), hr5, hr5 - hr5Hist.lagged(), hr5 - restHr
+    };
+    float c = CORR_INTERCEPT;
+    for (int i = 0; i < CORR_N_FEATURES; i++) c += CORR_COEF[i] * x[i];
+    corr = fminf(fmaxf(c, -CORR_MAX_C), CORR_MAX_C);
+    on = true;
+  }
+
+  // The estimate to show, from the filter's clamped estimate.
+  float estimate(float ct) const {
+    return on ? fminf(fmaxf(ct + corr, CT_MIN), CT_MAX) : ct;
+  }
+};
+
+// The +/- for the estimate on screen: the table that matches how it was
+// made, widened while coasting.
+inline float calibratedHalf(float est, bool corrected, int coastMinutes) {
+  return (corrected ? conformal_half_width(est) : conformal_half_width_raw(est))
+         + coastInflation(coastMinutes);
 }
 
 } // namespace ember

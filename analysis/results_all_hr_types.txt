@@ -32,15 +32,18 @@ loaded Prospie dataset_open access V3.xlsx
   trials by HR sensor: finger PPG 28, Equivital chest ECG 103, Polar chest strap 24
   core temp range 35.96 - 39.53 C
 
+  Shipped estimate: ECTemp + learned correction (firmware 2.3), on for 100.0% of scored minutes.
+  Run with --no-correction for the filter alone (firmware 2.2).
+
 ====================================================================
  1. HONEST ACCURACY  (leave-one-subject-out)
 ====================================================================
   n = 17196 samples, 40 subjects
-  RMSE   0.431 C
-  MAE    0.337 C
-  bias   -0.191 C
-  95% limits of agreement  -0.95 to +0.57 C
-  R^2    0.4013
+  RMSE   0.310 C
+  MAE    0.246 C
+  bias   -0.023 C
+  95% limits of agreement  -0.63 to +0.58 C
+  R^2    0.6889
 
   For reference, published figures for this algorithm:
     original paper (Buller 2013)           RMSE 0.30, R^2 0.71
@@ -49,8 +52,8 @@ loaded Prospie dataset_open access V3.xlsx
                                            R^2  0.47 (D1), -0.40 (D2)
 
   Detecting core temp >= 38.0 C (prevalence 42%)
-    sensitivity 0.549   specificity 0.910
-    missed 3255 of 7212 elevated samples
+    sensitivity 0.732   specificity 0.860
+    missed 1933 of 7212 elevated samples
   Benchmark reference: sensitivity 0.71 (D1), 0.33 (D2)
 
 ====================================================================
@@ -58,10 +61,10 @@ loaded Prospie dataset_open access V3.xlsx
 ====================================================================
    nominal |   Kalman   width | conformal   width
   --------------------------------------------------
-      0.50 |    0.135   0.143 |     0.500   0.545
-      0.80 |    0.254   0.272 |     0.795   1.105
-      0.90 |    0.328   0.349 |     0.895   1.428
-      0.95 |    0.386   0.416 |     0.945   1.724
+      0.50 |    0.135   0.143 |     0.495   0.417
+      0.80 |    0.254   0.272 |     0.785   0.759
+      0.90 |    0.328   0.349 |     0.891   0.983
+      0.95 |    0.386   0.416 |     0.945   1.197
 
   A 90% interval that covers far less than 90% of the time is
   worse than no interval, because a user acts on it.
@@ -69,14 +72,14 @@ loaded Prospie dataset_open access V3.xlsx
 ====================================================================
  3. DOES IT WORK EQUALLY WELL FOR EVERYONE?
 ====================================================================
-  F  n_subj=17  RMSE 0.453  bias -0.172  R^2 +0.257  90% coverage 0.872
-  M  n_subj=21  RMSE 0.418  bias -0.211  R^2 +0.476  90% coverage 0.904
+  F  n_subj=17  RMSE 0.296  bias -0.004  R^2 +0.684  90% coverage 0.905
+  M  n_subj=21  RMSE 0.323  bias -0.040  R^2 +0.688  90% coverage 0.880
 
-  BIAS difference (M minus F): -0.039 C <- primary
-    bootstrap 95% CI over subjects [-0.217, +0.152]  includes zero
+  BIAS difference (M minus F): -0.036 C <- primary
+    bootstrap 95% CI over subjects [-0.134, +0.065]  includes zero
 
-  RMSE difference (M minus F): -0.035 C
-    bootstrap 95% CI over subjects [-0.151, +0.076]  includes zero
+  RMSE difference (M minus F): +0.027 C
+    bootstrap 95% CI over subjects [-0.023, +0.074]  includes zero
 
   Note on metric choice: a systematic offset between groups
   shows up in BIAS and barely moves RMSE. Audit on bias, or
@@ -87,19 +90,19 @@ loaded Prospie dataset_open access V3.xlsx
   ran no sex analysis; several others had none at all.
 
   By heart-rate sensor (trial's main sensor):
-    finger PPG           n_subj=15  n= 3271  RMSE 0.539  bias -0.407  90% coverage 0.809
-    Equivital chest ECG  n_subj=23  n=11084  RMSE 0.368  bias -0.090  90% coverage 0.932
-    Polar chest strap    n_subj=14  n= 2841  RMSE 0.510  bias -0.335  90% coverage 0.847
+    finger PPG           n_subj=15  n= 3271  RMSE 0.315  bias -0.122  90% coverage 0.854
+    Equivital chest ECG  n_subj=23  n=11084  RMSE 0.287  bias +0.026  90% coverage 0.925
+    Polar chest strap    n_subj=14  n= 2841  RMSE 0.384  bias -0.097  90% coverage 0.800
 
 ====================================================================
  4. WHEN SHOULD THE DEVICE REFUSE TO ANSWER?
 ====================================================================
    answered    RMSE     MAE   width threshold
-       100%   0.431   0.337   <= 0.831 C
-        82%   0.436   0.342   <= 0.789 C
-        63%   0.434   0.345   <= 0.749 C
-        45%   0.426   0.341   <= 0.704 C
-        26%   0.445   0.353   <= 0.637 C
+       100%   0.310   0.246   <= 0.623 C
+        82%   0.301   0.237   <= 0.549 C
+        63%   0.297   0.233   <= 0.530 C
+        45%   0.283   0.222   <= 0.498 C
+        26%   0.265   0.207   <= 0.418 C
 
   Pick the operating point deliberately and defend it. A device
   that answers 70% of the time and is right when it does beats one

@@ -73,7 +73,7 @@ def figure_1_coverage_bars(res, prefix="judges"):
         sub = res if lo is None else res[(res["core_c"] >= lo) & (res["core_c"] < hi)]
         if len(sub) == 0:
             continue
-        glo, ghi = gaussian_interval(sub["pred"], sub["var"], 0.90)
+        glo, ghi = gaussian_interval(sub["kalman_pred"], sub["var"], 0.90)
         kalman_covs.append(coverage(sub["core_c"], glo, ghi))
         conformal_covs.append(coverage(sub["core_c"], sub["c_lo_0.9"], sub["c_hi_0.9"]))
         labels.append(f"{label}\nn={len(sub):,}")
@@ -109,7 +109,8 @@ def figure_1_coverage_bars(res, prefix="judges"):
               ncol=3, frameon=False)
     ax.grid(axis="y", alpha=0.3, zorder=0)
 
-    fig.text(0.5, -0.1, "PROSPIE V3, 37 people, chest heart rate, leave-one-subject-out",
+    fig.text(0.5, -0.1, "PROSPIE V3, 37 people, chest heart rate, leave-one-subject-out. "
+             "Ember = filter + learned correction (firmware 2.3)",
              ha="center", fontsize=11, color=GREY)
     fig.tight_layout()
     _save(fig, f"{prefix}_coverage.png")
@@ -144,6 +145,9 @@ def figure_2_trial_with_interval(res, prefix="judges"):
                     label="Ember ± (90% calibrated range)")
     ax.plot(t, true_core, "-", color=INK, linewidth=3,
             label="True core (rectal reference)", zorder=10)
+    if "kalman_pred" in trial and not np.allclose(trial["kalman_pred"], pred):
+        ax.plot(t, trial["kalman_pred"].values, "--", color=GREY, linewidth=2,
+                label="Filter alone (before the learned correction)", zorder=8)
     ax.plot(t, pred, "-", color=ACC, linewidth=2.5,
             label="Ember estimate", zorder=9)
 
@@ -154,7 +158,7 @@ def figure_2_trial_with_interval(res, prefix="judges"):
 
     ax.set_xlabel("Time (minutes)", fontsize=16, fontweight="bold")
     ax.set_ylabel("Core temperature (°C)", fontsize=16, fontweight="bold")
-    ax.set_title(f"One trial: the estimate lags; the ± held {inside:.0%} of the time",
+    ax.set_title(f"One trial: the ± held {inside:.0%} of the time",
                  fontsize=17, fontweight="bold", pad=15)
     ax.legend(fontsize=12, loc="upper left", framealpha=0.95)
     ax.grid(alpha=0.3)
@@ -167,9 +171,12 @@ def figure_2_trial_with_interval(res, prefix="judges"):
 
 
 def figure_3_alert_timing(res, prefix="judges"):
-    """Where each alert stood when true core first reached 38.5 °C."""
+    """Where each alert stood when true core first reached 38.5 °C.
+    Grey bars: the filter alone (firmware 2.2), for comparison."""
     t = alert_timing(res)
     n = len(t)
+    have_before = "kalman_pred" in res and not np.allclose(res["kalman_pred"], res["pred"])
+    tb = alert_timing(res.assign(pred=res["kalman_pred"])) if have_before else None
 
     cats = ["Already on", "1–10 min\nlate", "11–30 min\nlate", "Over 30 min\nlate", "Never"]
 
@@ -190,15 +197,27 @@ def figure_3_alert_timing(res, prefix="judges"):
             (axes[1], "act", "Act now", ACT_NOW_C, ACT)):
         counts = np.bincount([bucket(v) for v in t[f"{key}_lag"]], minlength=len(cats))
         colors = [OK] + [color] * 3 + [GREY]
-        bars = ax.bar(range(len(cats)), counts, color=colors, alpha=0.9,
-                      edgecolor=INK, linewidth=0.5)
+        x = np.arange(len(cats))
+        w = 0.4 if have_before else 0.8
+        if have_before:
+            before = np.bincount([bucket(v) for v in tb[f"{key}_lag"]], minlength=len(cats))
+            bb = ax.bar(x - w / 2, before, w, color="white", edgecolor=GREY, linewidth=1.5,
+                        hatch="//", label="Filter alone (2.2)")
+            for b, c in zip(bb, before):
+                ax.text(b.get_x() + b.get_width() / 2, c + 0.6, f"{c}",
+                        ha="center", va="bottom", fontsize=12, color=GREY)
+        bars = ax.bar(x + (w / 2 if have_before else 0), counts, w, color=colors, alpha=0.9,
+                      edgecolor=INK, linewidth=0.5, label="Ember 2.3" if have_before else None)
         for b, c in zip(bars, counts):
             ax.text(b.get_x() + b.get_width() / 2, c + 0.6, f"{c}",
                     ha="center", va="bottom", fontsize=15, fontweight="bold", color=INK)
-        ax.set_xticks(range(len(cats)))
+        ax.set_xticks(x)
         ax.set_xticklabels(cats, fontsize=13)
-        ax.set_title(f"{name} (estimate ≥ {th}°C): on in time {counts[0]}/{n}",
+        was = f" (was {before[0]})" if have_before else ""
+        ax.set_title(f"{name} (estimate ≥ {th}°C): on in time {counts[0]}/{n}{was}",
                      fontsize=16, fontweight="bold")
+        if have_before:
+            ax.legend(fontsize=11, loc="upper center", frameon=False)
         ax.grid(axis="y", alpha=0.3)
         ax.tick_params(axis="y", labelsize=12)
     axes[0].set_ylabel("Number of trials", fontsize=14, fontweight="bold")

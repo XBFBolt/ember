@@ -7,6 +7,10 @@ import { THRESHOLDS } from './datastore.js';
  * (forecastRange). projectForward is kept for the Phase 2 filter-agreement
  * test; it is not used on screen.
  *
+ * The estimate on screen comes from the device and already includes the
+ * learned correction (firmware 2.3, ember_core.h struct Correction). The
+ * app never recomputes it; the filter mirror below is the filter alone.
+ *
  * Coefficients mirror firmware/ember/ember_core.h exactly. Do not retype them.
  * This mirror still steps every 5 s (the retired v1 firmware); v2 steps once
  * a minute on the minute-mean heart rate.

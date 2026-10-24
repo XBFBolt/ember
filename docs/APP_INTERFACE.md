@@ -8,10 +8,16 @@ tested against the firmware's encoder byte for byte (`--selftest`). The
 webapp's port is `decodeFrame()` in `webapp/src/lib/frame.js`, tested on the
 same frames and against `ember_core.h` (`node --test tests/test_frame.mjs`).
 
-This is the contract for **firmware 2.2** (hardware v5: one pulse sensor, two
-skin thermistors, one air thermistor outside the strap, IMU; no SHT40). The
-byte layout is unchanged from 2.1; the bytes that carried humidity,
-evaporative headroom and the two per-sensor heart rates are now reserved.
+This is the contract for **firmware 2.2 and 2.3** (hardware v5: one pulse
+sensor, two skin thermistors, one air thermistor outside the strap, IMU; no
+SHT40). The byte layout is unchanged from 2.1; the bytes that carried
+humidity, evaporative headroom and the two per-sensor heart rates are now
+reserved.
+
+**2.3**: the core estimate in the frame includes the learned correction once
+a baseline is captured, and the ± is from the matching (narrower) table.
+Before the baseline both are the filter's own, exactly as in 2.2. The app
+decodes and shows them the same way either way; it never recomputes them.
 
 ## Connection
 
