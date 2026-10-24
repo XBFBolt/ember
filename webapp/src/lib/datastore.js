@@ -8,6 +8,8 @@
  * Views subscribe with datastore.subscribe(callback).
  */
 
+import { STATE, FLAG } from './frame.js';
+
 // ─── thresholds (mirror firmware) ────────────────────────────────────────────
 export const THRESHOLDS = {
   WATCH_C:          38.0,
@@ -40,20 +42,42 @@ export function statusForCt(ct) {
   return STATUS.OK;
 }
 
-// ─── firmware state codes (match serial CSV) ─────────────────────────────────
-const FW_STATE = { OK: 0, CAUTION: 1, REFUSE: 2 };
-
-function fwStateToStatus(fwState, ctEst) {
-  const valid = isFinite(ctEst);
-  // Never Paused at or above Watch: show the number (tagged Low confidence) instead.
-  if (fwState === FW_STATE.REFUSE && !(valid && round1(ctEst) >= THRESHOLDS.WATCH_C)) return STATUS.REFUSE;
-  if (!valid) return STATUS.REFUSE;
-  return statusForCt(ctEst);
+// ─── firmware state → app status ─────────────────────────────────────────────
+/**
+ * Paused comes from a blank number (the device blanks it on REFUSE), never from
+ * a flag alone. A number at or above Watch is always shown: the v2.1 device
+ * never refuses there, and the guard covers anything that still does.
+ */
+function _statusFor(fwState, core) {
+  if (core === null) return STATUS.REFUSE;
+  if (fwState === STATE.REFUSE && round1(core) < THRESHOLDS.WATCH_C) return STATUS.REFUSE;
+  return statusForCt(core);
 }
 
-function fwStateToConfidence(fwState, flags) {
-  if (fwState !== FW_STATE.OK || (flags & 0x20) !== 0) return 'low';
-  return 'normal';
+// "Starting…" vs "Pulse signal lost": both arrive as a blank number with the
+// stale-heart-rate flag (the device blanks the number until the filter's first
+// minute step after boot or a baseline, or after 2 minutes without a pulse).
+// The live heart-rate byte tells them apart: a pulse means a reading is on its
+// way, none means it is lost. The firmware accepts a minute with up to 30 bad
+// seconds, so a pulse counts as present for PULSE_HOLD_MS after the last one
+// (no flicker), which still shows a real loss within seconds.
+// With two doubts the device stays paused after the pulse is back, so that
+// isn't "on its way" either (same doubt count as stateFromFlags()).
+const PULSE_HOLD_MS = 10_000;
+let _lastPulseMs = null;
+
+function _netDoubts(flags) {
+  let d = 0;
+  if (flags & FLAG.MOTIONLESS_TACHY) d++;
+  if (flags & FLAG.NO_THERMAL_LOAD)  d++;
+  if (flags & FLAG.COOL_SKIN)        d++;
+  if (flags & FLAG.EVAP_FAILING)     d--;
+  return d;
+}
+
+function _isStarting(core, flags, t) {
+  return core === null && (flags & FLAG.STALE_HR) !== 0 && _netDoubts(flags) < 2 &&
+    _lastPulseMs !== null && t - _lastPulseMs <= PULSE_HOLD_MS;
 }
 
 // ─── per-minute history ──────────────────────────────────────────────────────
@@ -88,37 +112,57 @@ function _pushHistory(hist, row) {
 export const EVENT_TYPE = {
   OVERHEATING_ALERT:  'Overheating Alert',
   REST_BREAK_TAKEN:   'Rest Break Taken',
-  STRAP_OFFLINE:      'Strap Offline',
+  DEVICE_OFFLINE:     'Device Offline',
   BREAK_ENDED:        'Break Ended',
   CHECKED_IN_OK:      'Checked In — OK',
 };
 
 // ─── state ───────────────────────────────────────────────────────────────────
-const _state = {
-  // Latest reading
-  latest: {
-    timestampMs:  null,
-    hr:           null,  // bpm
-    ctEst:        null,  // °C
-    ctLo:         null,  // °C lower bound
-    ctHi:         null,  // °C upper bound
-    skinC:        null,  // °C
-    microC:       null,  // °C
-    microRh:      null,  // %
-    evapKpa:      null,  // kPa
-    actRms:       null,
-    stepHz:       null,
-    fwState:      null,  // 0/1/2
-    flags:        null,  // hex byte
+function _emptyLatest() {
+  return {
+    timestampMs:  null,  // arrival time (data clock)
+    seq:          null,
+    hr:           null,  // fused bpm
+    hrQuality:    null,  // HRQ.* (0 none, 1 single, 2 both agree, 3 disagree)
+    hrA:          null,
+    hrB:          null,
+    ctEst:        null,  // °C, null when the device withholds it
+    half:         null,  // calibrated ± °C, null when missing (never made up)
+    ctLo:         null,  // ctEst − half
+    ctHi:         null,  // ctEst + half
+    skinC:        null,
+    microC:       null,
+    microRh:      null,
+    evapKpa:      null,  // kept for the record; never shown (no kPa on screen)
+    activity:     null,  // g
+    fwState:      null,  // STATE.* (0 OK, 1 CAUTION, 2 REFUSE)
+    flags:        null,  // 16-bit
+    reasonFlag:   0,     // first set flag in REASON_ORDER
+    baselineRunning: false,
     status:       STATUS.REFUSE,
     confidence:   'normal',
-  },
+    starting:     false, // blank number, stale-HR flag, but a pulse (see PULSE_HOLD_MS): a reading is on its way
+  };
+}
+
+function _emptySession() {
+  return {
+    startMs:         null,  // first frame
+    startCt:         null,  // first number (after the last baseline), so "since start" never drifts
+    workStartMs:     null,  // first number after setup: break/water schedule and forecast start here
+    baselineStartMs: null,  // first frame of the running baseline (the frame has no progress field)
+    baselineFailed:  false, // the last baseline ended with no-baseline still set
+    haveNumber:      false, // a number has arrived since the start or the last baseline taken
+  };
+}
+
+const _state = {
+  latest:  _emptyLatest(),
 
   // Per-minute history for trend, forecast and chart (oldest first)
   history: [],
 
-  // Session: first valid reading, kept separately so "since start" never drifts
-  session: { startMs: null, startCt: null, setupStartMs: null, workStartMs: null },
+  session: _emptySession(),
 
   // Weather (Open-Meteo, refreshed every 5 min)
   weather: {
@@ -132,15 +176,34 @@ const _state = {
   events: [],       // { id, type, ts, resolved, resolvedTs }
   nextEventId: 1,
 
-  // Demo / connection state
-  connected:    false,  // serial or sim
-  simulating:   false,
+  // Connection: which source feeds the store, and its link state
+  source:       'none',  // 'none' | 'demo' | 'ble' | 'serial'
+  link:         'off',   // 'off' | 'connecting' | 'connected' | 'reconnecting' | 'stalled'
+
   onBreak:      false,
   breakStartMs: null,
   breakTargetMin: 5,
   lastBreakEndMs: null,  // end of the last break (work period restarts here)
   lastDrinkMs:  null,
 };
+
+let _prevBaselineRunning = false;
+
+/** Forget everything about the current wearer session (keeps weather). */
+function _resetSession() {
+  _state.latest  = _emptyLatest();
+  _state.history = [];
+  _state.session = _emptySession();
+  _state.events  = [];
+  _state.onBreak = false;
+  _state.breakStartMs   = null;
+  _state.lastBreakEndMs = null;
+  _state.lastDrinkMs    = null;
+  _prevBaselineRunning  = false;
+  _lastPulseMs   = null;
+  _lastEventType = null;
+  _lastEventTs   = 0;
+}
 
 // ─── subscribers ─────────────────────────────────────────────────────────────
 const _subscribers = new Set();
@@ -161,12 +224,14 @@ export function subscribe(cb) {
 export function snapshot() {
   return {
     latest:     { ..._state.latest },
-    history:    _state.history.map(b => ({ t: b.t, ctEst: b.ctEst, ctLo: b.ctLo, ctHi: b.ctHi, hr: b.hr, skinC: b.skinC, status: b.status })),
+    history:    _state.history.map(b => ({ minute: b.minute, t: b.t, ctEst: b.ctEst, ctLo: b.ctLo, ctHi: b.ctHi, hr: b.hr, skinC: b.skinC, status: b.status })),
     session:    { ..._state.session },
     weather:    { ..._state.weather },
     events:     _state.events.map(e => ({ ...e })),
-    connected:  _state.connected,
-    simulating: _state.simulating,
+    source:     _state.source,
+    link:       _state.link,
+    connected:  _state.link === 'connected',
+    simulating: _state.source === 'demo',
     onBreak:    _state.onBreak,
     breakStartMs: _state.breakStartMs,
     breakTargetMin: _state.breakTargetMin,
@@ -176,79 +241,97 @@ export function snapshot() {
   };
 }
 
-// ─── ingest a parsed CSV row from the firmware ───────────────────────────────
+// ─── ingest one frame ────────────────────────────────────────────────────────
+const _num = x => (x === null || x === undefined || !Number.isFinite(x)) ? null : x;
+
 /**
- * row = {
- *   ms, hr, ct_est, ct_lo, ct_hi, kalman_half,
- *   skin_c, micro_c, micro_rh, evap_kpa,
- *   act_rms, step_hz, state, flags
- * }
+ * f: a decoded frame (decodeFrame in frame.js; the USB bench path and the demo
+ * build the same shape). t: arrival time in ms. The device's seq only counts
+ * while connected, so frames are timestamped on arrival; the demo passes its
+ * own faster clock.
  */
-// Tracks the wall-clock time of the first ingest so we can compute
-// simulated elapsed time from the firmware's ms field.
-let _simEpochWall = null;
-let _simEpochMs   = null;
+export function ingestFrame(f, t = Date.now()) {
+  const flags   = f.flags ?? 0;
+  const fwState = f.state ?? STATE.OK;
+  const core    = _num(f.core);
+  // A blank number stays blank: never filled with an older value.
+  const half    = core === null ? null : _num(f.half);
+  const running = !!f.baselineRunning || (flags & FLAG.BASELINE_RUNNING) !== 0;
+  const status  = _statusFor(fwState, core);
+  const hr      = _num(f.hr);
 
-export function ingestRow(row) {
-  const ctEst   = parseFloat(row.ct_est);
-  const fwState = parseInt(row.state, 10);
-  const flags   = parseInt(row.flags, 16) || 0;
-
-  // Never REFUSE when ctEst >= WATCH_C — fwStateToStatus keeps the number (low confidence)
-  const status = fwStateToStatus(fwState, ctEst);
-
-  const confidence = fwStateToConfidence(fwState, flags);
-
-  const rowMs = parseFloat(row.ms) || 0;
-  if (_simEpochWall === null) {
-    _simEpochWall = Date.now();
-    _simEpochMs   = rowMs;
+  // ── session bookkeeping ──
+  const sess = _state.session;
+  if (sess.startMs === null) sess.startMs = t;
+  if (running && !_prevBaselineRunning) {
+    // Baseline started: setup countdown from here, work clock restarts after it
+    sess.baselineStartMs = t;
+    sess.baselineFailed = false;
+    sess.workStartMs = null;
   }
-  // Reconstruct a wall-clock-aligned timestamp using sim time offsets
-  const timestampMs = _simEpochWall + (rowMs - _simEpochMs);
+  if (!running && _prevBaselineRunning) {
+    sess.baselineStartMs = null;
+    if (flags & FLAG.NO_BASELINE) {
+      // No signal of its own: the bit drops and no-baseline stays set.
+      // (Too few good heart-rate seconds, or the estimate reached Watch.)
+      sess.baselineFailed = true;
+    } else {
+      // Taken: the device restarted the filter, so "since start" restarts too
+      sess.startCt = null;
+      sess.haveNumber = false;
+    }
+  }
+  if (!(flags & FLAG.NO_BASELINE)) sess.baselineFailed = false;
+  _prevBaselineRunning = running;
+
+  if (hr !== null) _lastPulseMs = t;
+  const starting = _isStarting(core, flags, t);
+  if (core !== null) sess.haveNumber = true;
 
   _state.latest = {
-    timestampMs,
-    hr:          parseFloat(row.hr)        || null,
-    ctEst:       isFinite(ctEst) ? ctEst   : null,
-    ctLo:        parseFloat(row.ct_lo)     || null,
-    ctHi:        parseFloat(row.ct_hi)     || null,
-    skinC:       parseFloat(row.skin_c)    || null,
-    microC:      parseFloat(row.micro_c)   || null,
-    microRh:     parseFloat(row.micro_rh)  || null,
-    evapKpa:     parseFloat(row.evap_kpa)  || null,
-    actRms:      parseFloat(row.act_rms)   || null,
-    stepHz:      parseFloat(row.step_hz)   || null,
+    timestampMs: t,
+    seq:         f.seq ?? null,
+    hr,
+    hrQuality:   f.hrQuality ?? null,
+    hrA:         _num(f.hrA),
+    hrB:         _num(f.hrB),
+    ctEst:       core,
+    half,
+    ctLo:        half === null ? null : core - half,
+    ctHi:        half === null ? null : core + half,
+    skinC:       _num(f.skin),
+    microC:      _num(f.microC),
+    microRh:     _num(f.microRh),
+    evapKpa:     _num(f.evapKpa),
+    activity:    _num(f.activity),
     fwState,
-    flags:       parseInt(row.flags, 16)   || 0,
+    flags,
+    reasonFlag:  f.reasonFlag ?? 0,
+    baselineRunning: running,
     status,
-    confidence,
+    confidence:  fwState === STATE.OK ? 'normal' : 'low',
+    starting,
   };
 
   _pushHistory(_state.history, {
-    t:      timestampMs,
-    ctEst:  _state.latest.ctEst,
+    t,
+    ctEst:  core,
     ctLo:   _state.latest.ctLo,
     ctHi:   _state.latest.ctHi,
-    hr:     _state.latest.hr,
+    hr,
     skinC:  _state.latest.skinC,
     status,
   });
 
-  const sess = _state.session;
-  if (sess.startMs === null) sess.startMs = timestampMs;
-  if (sess.startCt === null && _state.latest.ctEst !== null) sess.startCt = _state.latest.ctEst;
-  // Setup countdown runs from the first row that carries the no-baseline flag
-  if (flags & 0x20) { if (sess.setupStartMs === null) sess.setupStartMs = timestampMs; }
-  else {
-    sess.setupStartMs = null;
-    // Work (break/water schedule, forecast warm-up) starts with the first row after setup
-    if (sess.workStartMs === null) sess.workStartMs = timestampMs;
+  if (core !== null) {
+    if (sess.startCt === null) sess.startCt = core;
+    // Work (break/water schedule, forecast warm-up) starts with the first number after setup
+    const inSetup = (flags & (FLAG.NO_BASELINE | FLAG.BASELINE_RUNNING)) !== 0;
+    if (!inSetup && sess.workStartMs === null) sess.workStartMs = t;
   }
 
   // Auto-generate safety events
   if (status === STATUS.ACT_NOW) _maybeRaiseEvent(EVENT_TYPE.OVERHEATING_ALERT);
-  if (!_state.connected) _state.connected = true;
 
   _notify();
 }
@@ -317,9 +400,9 @@ export function resolveEvent(id) {
 }
 
 /**
- * "Now" on the data clock: the latest row's timestamp. On the device this tracks
- * the wall clock; in the demo it runs at simulation speed, so break, water and
- * elapsed times all move together.
+ * "Now" on the data clock: the latest frame's arrival time. On the device this
+ * tracks the wall clock; in the demo it runs at simulation speed, so break,
+ * water and elapsed times all move together.
  */
 export function dataNow() {
   return _state.latest.timestampMs ?? Date.now();
@@ -351,21 +434,33 @@ export function recordDrink() {
   _notify();
 }
 
-/** Mark strap as offline */
-export function markStrapOffline() {
-  _maybeRaiseEvent(EVENT_TYPE.STRAP_OFFLINE);
-  _state.connected = false;
-  _notify();
-}
-
 // ─── connection state ─────────────────────────────────────────────────────────
-export function setConnected(v) {
-  _state.connected = v;
-  if (!v) markStrapOffline();
+/**
+ * Switch the source feeding the store. A different source starts a new
+ * session (demo history never mixes with the device's); the same source
+ * reconnecting keeps its history. `fresh` forces a new session for the same
+ * source (a restarted demo: its clock starts over).
+ */
+export function setSource(source, { fresh = false } = {}) {
+  if (fresh || source !== _state.source) {
+    _resetSession();
+    _state.link = 'off';   // the old source's link state doesn't carry over
+  }
+  _state.source = source;
   _notify();
 }
 
-export function setSimulating(v) {
-  _state.simulating = v;
+/**
+ * Link state of the current source: 'off' | 'connecting' | 'connected' |
+ * 'reconnecting' | 'stalled' (still connected, but no frame for a few seconds).
+ */
+export function setLink(link) {
+  const wasUp = _state.link === 'connected';
+  const device = _state.source === 'ble' || _state.source === 'serial';
+  _state.link = link;
+  if (wasUp && link !== 'connected' && device) _maybeRaiseEvent(EVENT_TYPE.DEVICE_OFFLINE);
+  // Back up after a drop: the last frame is old, so it must not show as live
+  // until a fresh one arrives. History and the session are kept.
+  if (!wasUp && link === 'connected' && device) _state.latest = _emptyLatest();
   _notify();
 }

@@ -143,28 +143,66 @@ Done Oct 24: v2 copied in, `firmware/ember_firmware.ino` deleted, and the real P
 
 The device sends one 20-byte frame a second over BLE (`docs/APP_INTERFACE.md`). Chrome on the laptop connects with Web Bluetooth; no app store.
 
-- [ ] `src/lib/ble.js`: `connectBle()` (requestDevice name "Ember", service `e3b10001-…`), notifications on `…0002`, `sendCommand(text)` on `…0003`, auto-reconnect, disconnect handling.
-- [ ] `decodeFrame(DataView)`, ported from `tools/ember_ble.py`; unit-test it against the self-test frames.
-- [ ] `datastore.ingestFrame(f)`: timestamp on arrival (seq only counts while connected); a blank core on REFUSE means Paused; single ± (lo/hi = core ± half); flags are 16-bit; state bit 4 = baseline running.
-- [ ] Personal view for v2:
-  - [ ] Paused message for 0x08: "Pulse signal lost. Press the sensors flat against your skin."
-  - [ ] "Setting up" countdown driven by the baseline-running bit (300 s), with "Start baseline" sending `BASELINE`
-  - [ ] Only show the baseline button during setup, never mid-session. A mid-session baseline resets the estimate and hides it for a minute (the firmware already ignores it at 38.0 or above).
-  - [ ] "Starting…" for the first minute after connect or baseline (no number yet), not "signal lost"
-  - [ ] show the CAUTION reason next to "Low confidence" (e.g. "one pulse sensor only")
-  - [ ] 0x80: a calm "Your body is struggling to cool down" line, no sweat wording
-  - [ ] hide battery; optional "2 pulse sensors agree" from heart-rate quality
-- [ ] Connection chip: Bluetooth first; USB serial kept for the bench (parse the new 24-column CSV: `ct_lo`, `ct_hi`, `state`, `flags` 0x%04X, "nan").
-- [ ] Simulation emits v2 frames through the same decoder, so the demo and the device share one code path. Stop it when a device connects.
-- [ ] On the real device: same minute shows the same core, ±, state and reason in the app and in `ember_ble.py`.
+- [x] `src/lib/ble.js`: `connectBle()` (requestDevice name "Ember", service `e3b10001-…`), notifications on `…0002`, `sendCommand(text)` on `…0003`, auto-reconnect, disconnect handling.
+  - Reconnects by itself after a drop (1, 2, 4, 8, then every 15 s) with the same device object, so no chooser. History is kept; Disconnect stops the retries.
+  - `src/lib/device.js` picks the source (demo, Bluetooth or USB) and sends `BASELINE` to whichever is active.
+  - `node --test tests/test_link.mjs` (2 pass, about 5 s) runs it against a fake `navigator.bluetooth`. Frames arrive and `BASELINE` is written. A drop goes to reconnecting and recovers on the second retry. No duplicate listeners, Disconnect stops the retries, and a failed first connect goes back to the demo. **Not yet run against a real board.**
+  - Second pass (review), fixed:
+    - After a reconnect, the last pre-drop number no longer shows as live; it waits for a fresh frame.
+    - USB unplug now always closes the port. "Connected" is reported only after `START` is written, and `START` is resent if no header arrives.
+    - Starting vs Paused no longer flickers on a single bad pulse second (a 10 s hold).
+    - "Pulse found again" is no longer promised when two doubts will keep it paused.
+    - A failed first connect goes back to the demo.
+    - No spurious "Device Offline" event when switching from the demo.
+    - The hero says "Connecting" on a first connect.
+    - Start baseline ignores a double click.
+    - The stall watchdog only runs while a device is the source.
+  - Fixed (review): **Disconnect pressed while connecting** could still end up "connected" (the in-flight connect finished afterwards), or toast an error. It now stays off, quietly. A timed-out connect is aborted instead of left pending.
+  - Fixed (review): the chooser also matches on the service UUID, not only the name "Ember", since macOS can keep a board's old cached name after a reflash.
+  - Added (review): **stall watchdog** in `device.js`. A device that stays connected but sends nothing for 5 s (firmware stuck, power bank off before the link times out) goes to "No data": the number is taken off screen, as when Offline, and comes back with the next frame.
+- [x] `decodeFrame(DataView)`, ported from `tools/ember_ble.py`; unit-test it against the self-test frames.
+  - In `src/lib/frame.js` (pure, no DOM) with `encodeFrame` for the simulation. `node --test tests/test_frame.mjs` (17 pass): the 4 self-test frames, the firmware encoder's bytes, a round trip, flag bits, reason order and text against `ember_core.h`, the CSV path, and the datastore's Paused / Starting / reconnect rules.
+- [x] `datastore.ingestFrame(f)`: timestamp on arrival (seq only counts while connected); a blank core on REFUSE means Paused; single ± (lo/hi = core ± half); flags are 16-bit; state bit 4 = baseline running.
+  - `ingestFrame(f, t)`: `t` defaults to arrival time; the demo passes its own faster clock. `ingestRow` is gone.
+  - `setSource()` / `setLink()` replace `setConnected` / `setSimulating`. A new source starts a fresh session, so demo history never mixes with the device's. The same source reconnecting keeps its history.
+- [x] Personal view for v2:
+  - [x] Paused message for 0x08: "Pulse signal lost. Press the sensors flat against your skin."
+  - [x] "Setting up" countdown driven by the baseline-running bit (300 s), with "Start baseline" sending `BASELINE`
+    - The frame has no progress field, so the countdown runs from the first frame with the bit. After a reconnect mid-baseline it restarts (approximate by up to the time disconnected).
+  - [x] Only show the baseline button during setup, never mid-session. A mid-session baseline resets the estimate and hides it for a minute (the firmware already ignores it at 38.0 or above).
+    - Offered only while `NO_BASELINE` is set, no baseline is running, and the estimate is below Watch (or still Starting). Disabled ("Baseline running") while it runs.
+  - [x] "Starting…" for the first minute after connect or baseline (no number yet), not "signal lost"
+    - Both arrive as a blank number with `STALE_HR`. The live heart-rate byte tells them apart (no timer, so a real loss is never hidden). A pulse with no number yet since the start or the last baseline shows Starting ("Getting a first reading"). A pulse mid-session shows Paused ("Pulse found again. The number comes back within a minute."). No pulse shows Paused ("Pulse signal lost…").
+    - At 38.0 and up, a lost pulse arrives as CAUTION with the number held. The reason beside Low confidence says "pulse signal lost: showing the last estimate, the range is widening".
+    - A failed baseline (the bit drops while `NO_BASELINE` stays set) says "Baseline didn't take. Check the sensors are flat against your skin, sit still and try again."
+  - [x] show the CAUTION reason next to "Low confidence" (e.g. "one pulse sensor only")
+    - Plain-words map in `PersonalView.js` (`CAUTION_TEXT`). The firmware strings stay in `frame.js` for the tests.
+  - [x] 0x80: a calm "Your body is struggling to cool down" line, no sweat wording
+    - Shown under the status whenever the flag is set, with a number or Paused.
+  - [x] hide battery; optional "2 pulse sensors agree" from heart-rate quality
+    - Battery is never shown. The heart-rate line says "2 sensors agree", "1 sensor" or "sensors disagree".
+  - Also: an "Offline" hero when the link is down ("Lost the connection to Ember. Reconnecting…"). The last number is not left on screen, and heart rate, skin and motion show "—".
+- [x] Connection chip: Bluetooth first; USB serial kept for the bench (parse the new 24-column CSV: `ct_lo`, `ct_hi`, `state`, `flags` 0x%04X, "nan").
+  - Menu: Connect Ember (Bluetooth), Disconnect / Stop demo, USB cable (bench), Show demo (Restart demo once stopped). Chip: Demo, Bluetooth, USB, Connecting…, Reconnecting… / No data (blinking dot), Disconnected. Cancelling a chooser is silent; other errors get a toast.
+  - Fixed (review): **Stop demo, then Show demo did nothing** until a page reload (`startDemo()` returned early because the demo was still the active source). Restart now works and starts a fresh session, since the demo's clock starts over.
+  - USB: `csvLineToFrame()` in `serial.js` maps a row to the frame shape, half = (ct_hi − ct_lo) / 2, and blanks the number on REFUSE as the device does. `kalman_half` is ignored.
+- [x] Simulation emits v2 frames through the same decoder, so the demo and the device share one code path. Stop it when a device connects.
+  - Moved to `src/lib/sim.js`; it encodes each frame to bytes, then `decodeFrame()`s them. Same timeline as the device: Starting (1 min), No baseline yet (waits for Start baseline, starts itself after 2 min), Setting up (5 min), Starting (1 min), then the work bout to 38.7 °C and back to 38.0. One minute on one pulse sensor shows Low confidence. Still 7.5× speed.
+  - It stops once a device is picked in the chooser, not before, so cancelling leaves the demo running.
+- [x] Fixed (review): the 30-min chart drew a straight line across minutes with no number (Paused, disconnected), filling the gap visually. Lines and the range band now break there; skin carries on if it has values.
+- [ ] On the real device: the same minute shows the same core, ±, state and reason in the app and on a second reader.
+  - The device takes one Bluetooth connection at a time, so the app and `ember_ble.py` can't both be connected. Instead: app over Bluetooth, with `START` on the USB serial monitor at the same time. Compare the CSV's `ct_est`, `ct_hi − ct_est`, `state` and `flags` against the app.
 
 ## Phase 5 · Demo safety net (Sat)
 
 - [ ] **Replay mode:** record frames to a file (`ember_ble.py --csv`) and play them back in the webapp at 1× or 10×. Button in the connection menu.
+  - Before anyone records: `ember_ble.py --csv` should also save the raw 20 bytes per row (hex), so replay runs through `decodeFrame()` like the device and the demo. It should also flush every row and reconnect after a drop.
+  - Replay can be one more source in `device.js`, calling `ingestFrame(decodeFrame(bytes), t)` with its own clock, the same way `sim.js` does.
 - [ ] Record 2–3 real sessions with the team: 5 min baseline, 12 min hard work, 10 min recovery. Keep the best one in `demo/`.
   - **Run `CAL` first** (build guide P6). `ID` must say "thermistor calibration: yes"; until then the skin checks are off and "Cannot estimate" can't fire on skin.
   - Pick hard work whose step rate is far from the heart rate: step-ups around 100/min, or cycling. Running puts cadence and heart rate both near 160, the case where pulse sensors are easiest to fool.
 - [ ] Bluetooth drop: the app shows "Disconnected · reconnecting", keeps history, resumes.
+  - The software was built in Phase 4 ("Reconnecting…" chip, Offline hero, history kept, auto-reconnect) and tested against a fake device. Tick this once a real drop has been tested: walk out of range, or unplug the power bank, then come back.
 - [ ] Load test: leave the app connected 30 min; no slowdown, no memory growth.
 - [ ] Coach view (optional): show the live wearer as one player card; the rest stay static examples.
 - [ ] Supervisor view (optional): live wearer's Act now appears as one event (no temperature shown).

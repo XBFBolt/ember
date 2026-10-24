@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ember</title>
+  <title>EMB.R</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -14,14 +14,17 @@
   <header class="topbar">
     <div class="topbar__inner">
       <div class="topbar__left">
-        <div class="brand">Ember</div>
+        <div class="brand">EMB.R</div>
         <div class="conn">
           <button type="button" id="conn-chip" class="conn__chip" aria-haspopup="true" aria-expanded="false" aria-controls="conn-menu">
             <span id="conn-dot" class="connection-dot"></span><span id="conn-label">Not connected</span>
           </button>
           <div id="conn-menu" class="conn__menu" hidden>
             <p id="conn-desc" class="conn__desc"></p>
-            <button type="button" id="conn-btn" class="btn btn--primary btn-sm">Connect device</button>
+            <button type="button" id="conn-ble"  class="btn btn--primary btn-sm">Connect EMB.R</button>
+            <button type="button" id="conn-off"  class="btn btn--secondary btn-sm">Disconnect</button>
+            <button type="button" id="conn-usb"  class="btn btn--secondary btn-sm">USB cable (bench)</button>
+            <button type="button" id="conn-demo" class="btn btn--secondary btn-sm">Show demo</button>
           </div>
         </div>
       </div>
@@ -41,8 +44,11 @@
   import { mount as mountCoach }      from './src/views/CoachView.js';
   import { mount as mountSupervisor } from './src/views/SupervisorView.js';
   import { subscribe }                from './src/lib/datastore.js';
-  import { connectSerial, disconnectSerial, startSimulation } from './src/lib/serial.js';
+  import {
+    startDemo, connectBluetooth, connectUsb, disconnect, bleAvailable, serialAvailable,
+  } from './src/lib/device.js';
   import { startWeatherWithGeolocation }    from './src/lib/weather.js';
+  import { toast }                          from './src/lib/toast.js';
 
   // ── view router ─────────────────────────────────────────────────────
   const VIEWS = {
@@ -91,19 +97,42 @@
   const connChip  = document.getElementById('conn-chip');
   const connMenu  = document.getElementById('conn-menu');
   const connDesc  = document.getElementById('conn-desc');
-  const connBtn   = document.getElementById('conn-btn');
-  let connState = 'none';   // 'demo' | 'device' | 'none'
+  const btnBle    = document.getElementById('conn-ble');
+  const btnOff    = document.getElementById('conn-off');
+  const btnUsb    = document.getElementById('conn-usb');
+  const btnDemo   = document.getElementById('conn-demo');
 
-  subscribe(({ connected, simulating }) => {
-    connState = simulating ? 'demo' : connected ? 'device' : 'none';
-    connDot.className = 'connection-dot' + (connState === 'demo' ? ' simulating' : connState === 'device' ? ' connected' : '');
-    connLabel.textContent = { demo: 'Demo', device: 'Connected', none: 'Not connected' }[connState];
-    connDesc.textContent  = {
-      demo:   'Showing a simulated session.',
-      device: 'Ember device connected over USB.',
-      none:   'No device connected.',
-    }[connState];
-    connBtn.textContent = connState === 'device' ? 'Disconnect' : 'Connect device';
+  subscribe(({ source, link }) => {
+    const device = source === 'ble' || source === 'serial';
+    const up     = link === 'connected';
+    const via    = source === 'ble' ? 'Bluetooth' : 'USB';
+    connDot.className = 'connection-dot' + (
+      source === 'demo' && up ? ' simulating' :
+      device && up            ? ' connected' :
+      device && link !== 'off' ? ' reconnecting' : '');
+    connLabel.textContent =
+      source === 'demo' ? (up ? 'Demo' : 'Demo stopped') :
+      !device           ? 'Not connected' :
+      link === 'connected'    ? via :
+      link === 'connecting'   ? 'Connecting…' :
+      link === 'reconnecting' ? 'Reconnecting…' :
+      link === 'stalled'      ? 'No data' : 'Disconnected';
+    connDesc.textContent =
+      source === 'demo' ? (up ? 'Showing a simulated session. Connect EMB.R to go live.'
+                              : 'The demo is stopped. Restart it or connect EMB.R.') :
+      !device           ? 'No device connected.' :
+      link === 'connected'    ? `EMB.R is connected over ${via}.` :
+      link === 'connecting'   ? 'Connecting to EMB.R…' :
+      link === 'reconnecting' ? 'Lost EMB.R. Reconnecting by itself; history is kept.' :
+      link === 'stalled'      ? 'EMB.R is connected but has stopped sending. History is kept.' :
+                                'EMB.R is disconnected.';
+    // Connect is offered unless Bluetooth is up or already retrying
+    btnBle.hidden  = source === 'ble' && link !== 'off';
+    btnOff.hidden  = !(device && link !== 'off') && !(source === 'demo' && up);
+    btnOff.textContent = source === 'demo' ? 'Stop demo' : 'Disconnect';
+    btnUsb.hidden  = device && link !== 'off';
+    btnDemo.hidden = source === 'demo' && up;
+    btnDemo.textContent = source === 'demo' ? 'Restart demo' : 'Show demo';
   });
 
   function setMenu(open) {
@@ -114,14 +143,25 @@
   document.addEventListener('click', e => { if (!connMenu.contains(e.target)) setMenu(false); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') setMenu(false); });
 
-  connBtn.addEventListener('click', () => {
+  // Cancelling a chooser is not an error; anything else gets a toast.
+  async function tryConnect(fn, unavailable) {
     setMenu(false);
-    if (connState === 'device') disconnectSerial(); else connectSerial();
-  });
+    if (unavailable) { toast(unavailable); return; }
+    try { await fn(); }
+    catch (err) {
+      const msg = err?.message ?? String(err);
+      if (err?.name === 'NotFoundError' && /cancel|no port selected/i.test(msg)) return;
+      toast(`Couldn't connect: ${msg}`);
+    }
+  }
+  btnBle.addEventListener('click',  () => tryConnect(connectBluetooth, bleAvailable() ? null : 'Bluetooth needs Chrome. Turn Bluetooth on first.'));
+  btnUsb.addEventListener('click',  () => tryConnect(connectUsb, serialAvailable() ? null : 'USB needs Chrome on a laptop.'));
+  btnOff.addEventListener('click',  () => { setMenu(false); disconnect(); });
+  btnDemo.addEventListener('click', () => { setMenu(false); startDemo(); });
 
   // ── boot ─────────────────────────────────────────────────────────────
   startWeatherWithGeolocation();
-  startSimulation();
+  startDemo();
   switchView(viewFromUrl());
 </script>
 

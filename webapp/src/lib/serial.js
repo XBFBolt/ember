@@ -1,226 +1,175 @@
 /**
- * serial.js — Web Serial API bridge to the Ember device.
+ * serial.js — USB serial link to the device, for the bench (Chrome, Web Serial).
  *
- * Reads the CSV stream produced by the firmware when `START` is sent.
- * CSV header: ms,hr,ct_est,ct_lo,ct_hi,kalman_half,skin_c,micro_c,
- *             micro_rh,evap_kpa,act_rms,step_hz,state,flags
+ * Sends START and reads the firmware's 24-column CSV at 1 Hz. Each row becomes
+ * the same frame shape decodeFrame() returns, so the rest of the app can't
+ * tell USB from Bluetooth. The worn demo uses Bluetooth (ble.js).
  *
- * Falls back to simulation mode if Web Serial is unavailable
- * (Firefox, Safari, or no device connected).
+ * Unlike the Bluetooth frame, the CSV always carries ct_est, so a REFUSE row
+ * is blanked here, the same way the device blanks the frame.
  */
 
-import { ingestRow, setConnected, setSimulating, markStrapOffline } from './datastore.js';
-import { confHalf } from './estimator.js';
+import { STATE, FLAG, HRQ, reasonFlag, FLAG_TEXT } from './frame.js';
 
 const BAUD = 115200;
-const CSV_HEADER = 'ms,hr,ct_est,ct_lo,ct_hi,kalman_half,skin_c,micro_c,micro_rh,evap_kpa,act_rms,step_hz,state,flags';
+export const CSV_HEADER = 'ms,hrA,sqiA,hrB,sqiB,hr,hr_q,step_hz,act_g,skinA,skinB,skin,skin_q,' +
+  'micro_c,micro_rh,evap_kpa,vbat,ct_est,ct_lo,ct_hi,kalman_half,filter_step,state,flags';
 const FIELDS = CSV_HEADER.split(',');
 
-let _port   = null;
-let _reader = null;
-let _active = false;
+const START_RETRY_MS = 3_000;   // resend START if no header yet (the board may reset when the port opens)
+const START_TRIES    = 3;
+
+let _port    = null;
+let _reader  = null;
+let _pipe    = null;
+let _active  = false;
+let _headerSeen = false;
+let _startTimer = null;
+let _onFrame = () => {};
+let _onLink  = () => {};
+
+export function serialAvailable() {
+  return typeof navigator !== 'undefined' && 'serial' in navigator;
+}
+
+// ─── CSV → frame ─────────────────────────────────────────────────────────────
+
+/** "nan", "" or garbage → null. */
+function _num(s) {
+  if (s === undefined || s === null) return null;
+  const x = parseFloat(s);
+  return Number.isFinite(x) ? x : null;
+}
+
+/**
+ * One CSV line (after the header) → frame object, or null if it isn't a data row.
+ * kalman_half is ignored: it is the uncalibrated interval and is never shown.
+ */
+export function csvLineToFrame(line) {
+  const vals = line.trim().split(',');
+  if (vals.length !== FIELDS.length) return null;
+  const r = {};
+  FIELDS.forEach((k, i) => { r[k] = vals[i]; });
+
+  const state = (parseInt(r.state, 10) || 0) & 0x0f;
+  const flags = (parseInt(r.flags, 16) || 0) & 0xffff;
+  const refuse = state === STATE.REFUSE;
+  const core = refuse ? null : _num(r.ct_est);
+  const lo = _num(r.ct_lo), hi = _num(r.ct_hi);
+  const half = core !== null && lo !== null && hi !== null ? (hi - lo) / 2 : null;
+  const hr = _num(r.hr);
+  const rf = reasonFlag(flags);
+
+  return {
+    seq:             null,
+    core,
+    half,
+    state,
+    baselineRunning: (flags & FLAG.BASELINE_RUNNING) !== 0,
+    logging:         true,
+    flags,
+    reasonFlag:      rf,
+    reason:          rf ? FLAG_TEXT[rf] : '',
+    hr:              hr === 0 ? null : hr,
+    hrQuality:       parseInt(r.hr_q, 10) || HRQ.NONE,
+    skin:            _num(r.skin),
+    microC:          _num(r.micro_c),
+    microRh:         _num(r.micro_rh),
+    evapKpa:         _num(r.evap_kpa),
+    battery:         null,          // the power-bank build has no battery
+    activity:        _num(r.act_g),
+    hrA:             _num(r.hrA) || null,
+    hrB:             _num(r.hrB) || null,
+  };
+}
 
 // ─── connect ─────────────────────────────────────────────────────────────────
-export async function connectSerial() {
-  if (!('serial' in navigator)) {
-    console.warn('Web Serial not available — starting simulation');
-    startSimulation();
-    return false;
-  }
 
+/**
+ * Open the port chooser and start reading. Must be called from a click.
+ * Same callbacks as connectBle(). Rejects if the user cancels.
+ */
+export async function connectSerial({ onFrame, onLink }) {
+  if (!serialAvailable()) throw new Error('USB serial needs Chrome on a laptop.');
+  const port = await navigator.serial.requestPort();
+  await disconnectSerial({ quiet: true });
+  _onFrame = onFrame;
+  _onLink  = onLink;
+  _onLink('connecting');
   try {
-    _port = await navigator.serial.requestPort();
-    await _port.open({ baudRate: BAUD });
-    setConnected(true);
-    setSimulating(false);
+    await port.open({ baudRate: BAUD });
+    _port = port;
     _active = true;
-    _readLoop();
-    _sendStart();
-    return true;
+    _headerSeen = false;
+    _readLoop().catch(err => console.warn('Serial read loop:', err.message));
+    await sendSerialCommand('START');
   } catch (err) {
-    console.warn('Serial connect failed:', err.message);
-    startSimulation();
-    return false;
+    await disconnectSerial({ quiet: true });
+    _onLink('off');
+    throw err;
   }
+  _scheduleStartRetry(1);
+  _onLink('connected');   // only once the port is open and START is written
 }
 
-export async function disconnectSerial() {
+/** Close everything. Each step on its own: after an unplug some of them fail. */
+export async function disconnectSerial({ quiet = false } = {}) {
   _active = false;
-  try {
-    if (_reader) { await _reader.cancel(); _reader = null; }
-    if (_port)   { await _port.close();    _port   = null; }
-  } catch (_) { /* ignore */ }
-  setConnected(false);
+  if (_startTimer) { clearTimeout(_startTimer); _startTimer = null; }
+  const reader = _reader, pipe = _pipe, port = _port;
+  _reader = null; _pipe = null; _port = null;
+  if (reader) { try { await reader.cancel(); } catch (_) { /* stream already errored */ } }
+  if (pipe)   await pipe;                    // never rejects (caught where it's created)
+  if (port)   { try { await port.close(); } catch (_) { /* already gone */ } }
+  if (!quiet) _onLink('off');
 }
 
-async function _sendStart() {
-  if (!_port?.writable) return;
+function _scheduleStartRetry(tries) {
+  if (tries >= START_TRIES) return;
+  _startTimer = setTimeout(() => {
+    _startTimer = null;
+    if (!_active || _headerSeen) return;
+    sendSerialCommand('START').catch(() => {});
+    _scheduleStartRetry(tries + 1);
+  }, START_RETRY_MS);
+}
+
+export async function sendSerialCommand(text) {
+  if (!_port?.writable) throw new Error('EMB.R is not connected over USB.');
   const writer = _port.writable.getWriter();
-  await writer.write(new TextEncoder().encode('START\n'));
-  writer.releaseLock();
+  try { await writer.write(new TextEncoder().encode(text + '\n')); }
+  finally { writer.releaseLock(); }
 }
 
 // ─── read loop ───────────────────────────────────────────────────────────────
+
 async function _readLoop() {
   const decoder = new TextDecoderStream();
-  _port.readable.pipeTo(decoder.writable);
-  _reader = decoder.readable.getReader();
+  // Caught here so an unplug (the pipe aborts) is never an unhandled rejection
+  _pipe = _port.readable.pipeTo(decoder.writable).catch(() => {});
+  const reader = _reader = decoder.readable.getReader();
 
   let buf = '';
-  let headerSeen = false;
-
   try {
     while (_active) {
-      const { value, done } = await _reader.read();
+      const { value, done } = await reader.read();
       if (done) break;
       buf += value;
       const lines = buf.split('\n');
-      buf = lines.pop(); // incomplete last line stays in buffer
-
+      buf = lines.pop();                    // incomplete last line stays in the buffer
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        if (trimmed === CSV_HEADER) { headerSeen = true; continue; }
-        if (!headerSeen) continue;
-        _parseLine(trimmed);
+        const s = line.trim();
+        if (!s || s.startsWith('#')) continue;
+        if (s === CSV_HEADER) { _headerSeen = true; continue; }
+        if (!_headerSeen) continue;
+        const f = csvLineToFrame(s);
+        if (f) _onFrame(f);
       }
     }
   } catch (err) {
-    if (_active) {
-      console.warn('Serial read error:', err.message);
-      markStrapOffline();
-    }
+    if (_active) console.warn('Serial read error:', err.message);
   }
-}
-
-function _parseLine(line) {
-  const vals = line.split(',');
-  if (vals.length !== FIELDS.length) return;
-  const row = {};
-  FIELDS.forEach((f, i) => { row[f] = vals[i]; });
-  ingestRow(row);
-}
-
-// ─── simulation mode ──────────────────────────────────────────────────────────
-/**
- * Demo simulation: compresses a realistic 15-minute exercise bout into
- * ~2 minutes of wall-clock time (30 steps × 4 s = 120 s).
- *
- * Each tick advances simulated time by 30 s so the elapsed counter and
- * chart feel like a full 15-minute session even though it runs fast.
- *
- * Skin temp is always below core temp (~1–2 °C lower) and on a shared
- * scale so the chart separation is visually clear.
- */
-let _simTimer  = null;
-let _simStep   = 0;   // trajectory index, holds at the last step
-let _simTicks  = 0;   // ticks since start, keeps counting so the clock never stops
-
-// Simulated ms offset per step: 30 s of "exercise time" per tick
-const SIM_MS_PER_STEP = 30_000;
-// Wall-clock tick interval
-const SIM_TICK_MS = 4_000;
-// Setup phase first: 10 ticks = 5 simulated minutes (~40 s on the clock),
-// sitting still with the no-baseline flag (0x20) set, then the climb starts.
-const SIM_SETUP_TICKS = 10;
-
-export function startSimulation() {
-  if (_simTimer) return;
-  setSimulating(true);
-  setConnected(true);
-  _simStep = 0;
-  _simTicks = 0;
-  _simTimer = setInterval(_simTick, SIM_TICK_MS);
-  _simTick(); // immediate first tick
-}
-
-export function stopSimulation() {
-  if (_simTimer) { clearInterval(_simTimer); _simTimer = null; }
-  setSimulating(false);
-}
-
-// 30-step trajectory: warm-up → heat stress peak → partial recovery → hold
-// HR profile matches the exercise arc
-const SIM_HR_PROFILE = [
-  65, 67, 70, 74, 79, 85, 91, 97, 103, 109,
-  114, 118, 122, 125, 127, 129, 130, 131, 132, 132,
-  131, 130, 128, 126, 124, 122, 120, 118, 117, 116,
-];
-
-// Core temp waypoints: rises from 36.8 to ~38.7 by step 20,
-// then cools to ~38.0 by step 30.
-function _simCtEst(i) {
-  if (i <= 20) {
-    // Linear rise: 36.8 at step 0 → 38.7 at step 20
-    return 36.8 + (i / 20) * (38.7 - 36.8);
-  } else {
-    // Linear cool: 38.7 at step 20 → 38.0 at step 30
-    return 38.7 + ((i - 20) / 10) * (38.0 - 38.7);
+  if (_active && _reader === reader) {      // unplugged, not a user disconnect
+    await disconnectSerial();
   }
-}
-
-function _simSetupTick() {
-  // Resting and still: flat core, resting HR, almost no motion
-  const ctEst = 36.8 + (Math.random() - 0.5) * 0.04;
-  const half  = confHalf(ctEst);
-  ingestRow({
-    ms:          _simTicks * SIM_MS_PER_STEP,
-    hr:          (64 + (Math.random() - 0.5) * 3).toFixed(1),
-    ct_est:      ctEst.toFixed(3),
-    ct_lo:       (ctEst - half).toFixed(3),
-    ct_hi:       (ctEst + half).toFixed(3),
-    kalman_half: '0.80',
-    skin_c:      (35.3 + (Math.random() - 0.5) * 0.2).toFixed(2),
-    micro_c:     (30.0 + (Math.random() - 0.5) * 0.3).toFixed(2),
-    micro_rh:    (55 + (Math.random() - 0.5) * 3).toFixed(1),
-    evap_kpa:    '2.800',
-    act_rms:     (0.08 + Math.random() * 0.04).toFixed(3),
-    step_hz:     '0.00',
-    state:       0,
-    flags:       '0x20',   // no baseline yet → "Setting up"
-  });
-  _simTicks++;
-}
-
-function _simTick() {
-  if (_simTicks < SIM_SETUP_TICKS) { _simSetupTick(); return; }
-
-  // Clamp to last step — hold rather than loop
-  const i = Math.min(_simStep, SIM_HR_PROFILE.length - 1);
-
-  const hr      = SIM_HR_PROFILE[i] + (Math.random() - 0.5) * 3;
-
-  const ctEst   = _simCtEst(i) + (Math.random() - 0.5) * 0.04;
-  const half    = confHalf(ctEst);  // calibrated widths, as the device sends
-
-  // Skin temp: always 1.5–2.0 °C below core, with slight divergence during effort
-  // (skin cools slightly via sweating while core keeps rising)
-  const skinOffset = 1.5 + Math.min(i * 0.02, 0.5);
-  const skinC   = ctEst - skinOffset + (Math.random() - 0.5) * 0.2;
-
-  const microC  = 30.0 + i * 0.06 + (Math.random() - 0.5) * 0.3;
-  const microRh = Math.min(95, 55 + i * 1.2 + (Math.random() - 0.5) * 3);
-  const evapKpa = Math.max(0.1, 2.8 - i * 0.08 + (Math.random() - 0.5) * 0.1);
-  const actRms  = 0.6 + (Math.random() - 0.5) * 0.2;
-
-  // Use simulated ms so elapsed time shows "15 min" arc, not 2 min
-  ingestRow({
-    ms:          _simTicks * SIM_MS_PER_STEP,
-    hr:          hr.toFixed(1),
-    ct_est:      ctEst.toFixed(3),
-    ct_lo:       (ctEst - half).toFixed(3),
-    ct_hi:       (ctEst + half).toFixed(3),
-    kalman_half: '0.80',
-    skin_c:      skinC.toFixed(2),
-    micro_c:     microC.toFixed(2),
-    micro_rh:    microRh.toFixed(1),
-    evap_kpa:    evapKpa.toFixed(3),
-    act_rms:     actRms.toFixed(3),
-    step_hz:     '1.85',
-    state:       0,  // demo: always confident, so Act now shows cleanly
-    flags:       evapKpa < 0.8 ? '0x80' : '0x00',
-  });
-
-  _simStep = Math.min(_simStep + 1, SIM_HR_PROFILE.length - 1);
-  _simTicks++;
 }

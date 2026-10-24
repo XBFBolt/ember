@@ -15,10 +15,12 @@ import {
   CONF_EDGES, CONF_HALF, CONF_SYNTHETIC, CONF_MEASURED_COV,
 } from '../lib/estimator.js';
 import { toast } from '../lib/toast.js';
+import { sendCommand } from '../lib/device.js';
+import { FLAG, HRQ } from '../lib/frame.js';
 
 // ─── wearer + placeholder schedule ───────────────────────────────────────────
 // Placeholder until taken from a published heat-index table (see TODO Phase 2).
-const WEARER_NAME = 'Maya Chen';
+const WEARER_NAME = 'Charles Nelson';
 const SCHEDULE = {
   workMin:        20,   // 20 on …
   breakMin:        5,   // … 5 off
@@ -27,10 +29,43 @@ const SCHEDULE = {
   waterMl:       250,
   watchWaterMin:   5,   // Watch: drink now, then again within 5 min
 };
-const SETUP_MIN = 5;            // baseline capture: sit still for 5 min
+const SETUP_MIN = 5;            // baseline capture: sit still for 5 min (BASELINE_SEC on the device)
 const FORECAST_MIN_DATA = 5;    // minutes of data before forecasting
 const CHART_WINDOW_MIN = 30;
 const MIN = 60_000;
+const MOVING_G = 0.05;          // ACT_MOVING_G in ember_core.h
+
+// Low confidence: the firmware's reason, in the wearer's words.
+const CAUTION_TEXT = {
+  // Only seen with a number at 38.0 °C and up: the device holds the estimate and widens the ±
+  [FLAG.STALE_HR]:         'pulse signal lost: showing the last estimate, the range is widening',
+  [FLAG.MOTIONLESS_TACHY]: 'heart rate is up while you are still',
+  [FLAG.NO_THERMAL_LOAD]:  'you don\'t look like you are heating up',
+  [FLAG.COOL_SKIN]:        'your skin is cool',
+  [FLAG.PPG_DISAGREE]:     'the pulse sensors disagree',
+  [FLAG.CADENCE_LOCK]:     'a pulse sensor picked up your steps',
+  [FLAG.PPG_SINGLE]:       'one pulse sensor only',
+  [FLAG.BASELINE_RUNNING]: 'setting up',
+  [FLAG.NO_BASELINE]:      'no baseline yet',
+};
+
+const HRQ_TEXT = {
+  [HRQ.AGREED]:   ' · 2 sensors agree',
+  [HRQ.SINGLE]:   ' · 1 sensor',
+  [HRQ.DISAGREE]: ' · sensors disagree',
+};
+
+// Hero when there is no number to show
+const NO_NUMBER = {
+  offline:  { label: 'Offline',  key: 'paused',   title: 'Not connected' },
+  waiting:  { label: 'Starting', key: 'baseline', title: 'Starting up',
+              reason: 'Waiting for the first reading from EMB.R.', note: '' },
+  starting: { label: 'Starting', key: 'baseline', title: 'Getting a first reading',
+              reason: 'This takes about a minute. Keep the sensors flat against your skin.',
+              note: 'EMB.R shows a number once it has a full minute of heart rate.' },
+  paused:   { label: 'Paused',   key: 'paused',   title: 'Can\'t estimate right now',
+              note: 'EMB.R won\'t show a number it can\'t stand behind. It will come back on its own.' },
+};
 
 const LABELS = {
   [STATUS.OK]:      'OK',
@@ -51,13 +86,22 @@ export function mount(container) {
   container.innerHTML = _template();
   const root = container.querySelector('.personal');
   const dialog = container.querySelector('#how-sure');
-  let last = null;   // latest snapshot, so clicks act on state, not button text
+  let last = null;      // latest snapshot, so clicks act on state, not button text
+  let sending = false;  // one BASELINE write at a time (a second one would be rejected)
 
   const onClick = e => {
     if (e.target.closest('[data-action="primary"]')) {
       if (!last) return;
-      if (_isSetup(last.latest)) {
-        toast('Baseline capture starts from the device. Coming with the hookup.');
+      const setup = _setupState(last);
+      if (setup === 'running') return;                 // button is disabled; nothing to do
+      if (setup === 'needed') {
+        if (sending) return;
+        sending = true;
+        // Only offered during setup and below Watch; the device also ignores it at 38.0 or above.
+        sendCommand('BASELINE')
+          .then(() => toast(`Baseline started. Sit still for ${SETUP_MIN} minutes.`))
+          .catch(() => toast('Couldn\'t reach EMB.R. Check it is connected.'))
+          .finally(() => { sending = false; });
       } else if (last.onBreak) {
         endBreak();
       } else {
@@ -89,9 +133,33 @@ export function mount(container) {
   };
 }
 
-function _isSetup(latest) {
-  // Setup only while the temperature itself says OK: never hide Watch / Act now / Paused.
-  return latest.flags !== null && (latest.flags & 0x20) !== 0 && latest.status === STATUS.OK;
+/**
+ * What the hero shows: 'number', or why there is none.
+ * Paused comes from the state or a blank number, never from a flag alone.
+ */
+function _heroKind(data) {
+  const { latest, source, link } = data;
+  if (source === 'none' || link !== 'connected') return 'offline';
+  if (latest.timestampMs === null) return 'waiting';
+  // A pulse with no number yet: Starting after connect or a baseline, Paused mid-session
+  if (latest.ctEst === null) return latest.starting && !data.session.haveNumber ? 'starting' : 'paused';
+  if (latest.status === STATUS.REFUSE) return 'paused';
+  return 'number';
+}
+
+/**
+ * 'needed' (no baseline yet: offer Start baseline), 'running', or null.
+ * Setup only below Watch and never over Paused: a hot or paused wearer
+ * never gets the setup screen, and BASELINE is never offered mid-session.
+ */
+function _setupState(data) {
+  const { latest } = data;
+  if (latest.flags === null) return null;
+  const running = latest.baselineRunning;
+  if (!running && !(latest.flags & FLAG.NO_BASELINE)) return null;
+  const kind = _heroKind(data);
+  if (!(kind === 'starting' || (kind === 'number' && latest.status === STATUS.OK))) return null;
+  return running ? 'running' : 'needed';
 }
 
 // ─── render ───────────────────────────────────────────────────────────────────
@@ -99,29 +167,65 @@ function _render(root, data) {
   const { latest, history, session, onBreak, breakStartMs, breakTargetMin, now } = data;
   const { status, ctEst, ctLo, ctHi, hr, skinC, flags, confidence } = latest;
 
-  const setup  = _isSetup(latest);
-  const paused = status === STATUS.REFUSE;
-  const statusKey = setup ? 'baseline' : (STATUS_KEY[status] ?? 'paused');
+  const kind   = _heroKind(data);
+  const setup  = _setupState(data);
+  const paused = kind !== 'number';                // no number on screen, for any reason
+  const noNum  = NO_NUMBER[kind];
+  const statusKey = noNum ? noNum.key : setup ? 'baseline' : (STATUS_KEY[status] ?? 'paused');
 
   ['ok', 'watch', 'act', 'paused', 'baseline'].forEach(k => root.classList.remove('status--' + k));
   root.classList.add('status--' + statusKey);
 
   // ── hero ──
   _set(root, 'name', WEARER_NAME);
-  _set(root, 'mode', data.simulating ? 'Demo' : 'Live');
+  const device = data.source === 'ble' || data.source === 'serial';
+  _set(root, 'mode', data.simulating ? 'Demo'
+    : device && data.link === 'connected' ? 'Live'
+    : device && data.link === 'connecting' ? 'Connecting'
+    : device && data.link === 'stalled' ? 'No data'
+    : device && data.link === 'reconnecting' ? 'Reconnecting' : 'Offline');
   const elapsedMin = session.startMs !== null ? Math.max(0, (now - session.startMs) / MIN) : null;
   const workMin    = session.workStartMs !== null ? Math.max(0, (now - session.workStartMs) / MIN) : null;
   _set(root, 'elapsed', elapsedMin === null ? '—' : `${Math.floor(elapsedMin)} min`);
-  _set(root, 'label', LABELS[status] ?? 'Paused');
+  _set(root, 'label', noNum ? noNum.label : (LABELS[status] ?? 'Paused'));
 
+  // Tag, with the firmware's reason beside it in plain words
   const tag = root.querySelector('[data-field="tag"]');
-  const noBaseline = flags !== null && (flags & 0x20) !== 0;
-  if (noBaseline)              { tag.textContent = 'No baseline yet'; tag.hidden = false; }
-  else if (confidence === 'low' && !paused) { tag.textContent = 'Low confidence'; tag.hidden = false; }
-  else                         { tag.hidden = true; }
+  const rf  = latest.reasonFlag;
+  let tagText = '', why = '';
+  if (kind === 'number') {
+    if (setup === 'running')       tagText = 'Setting up';
+    else if (setup === 'needed')   tagText = 'No baseline yet';
+    else if (confidence === 'low') tagText = 'Low confidence';
+    const setupReason = rf === FLAG.NO_BASELINE || rf === FLAG.BASELINE_RUNNING;
+    if (confidence === 'low' && !(setup && setupReason)) {
+      // Next to a setup tag, say it's a separate doubt, not why there's no baseline
+      why = CAUTION_TEXT[rf] ? (setup ? `Low confidence: ${CAUTION_TEXT[rf]}` : CAUTION_TEXT[rf]) : '';
+    }
+  }
+  tag.textContent = tagText;
+  tag.hidden = !tagText;
+  _set(root, 'tagReason', why);
+  root.querySelector('[data-field="tagReason"]').hidden = !why;
 
   root.querySelector('[data-when="number"]').hidden = paused;
   root.querySelector('[data-when="paused"]').hidden = !paused;
+  if (noNum) {
+    const stalled = kind === 'offline' && data.link === 'stalled';
+    _set(root, 'pausedTitle', kind !== 'offline' ? noNum.title
+      : stalled ? 'No data from EMB.R'
+      : data.link === 'connecting' ? 'Connecting'
+      : data.link === 'reconnecting' ? 'Connection lost' : noNum.title);
+    _set(root, 'reason', kind === 'paused' ? _pauseReason(latest)
+      : kind === 'offline' ? _offlineReason(data) : noNum.reason);
+    _set(root, 'pausedNote', kind === 'offline'
+      ? (data.link === 'reconnecting' || stalled ? 'Your history is kept. The number comes back when EMB.R does.' : '')
+      : noNum.note);
+  }
+
+  // "Struggling to cool down" stands on its own, whatever the state
+  root.querySelector('[data-field="evap"]').hidden =
+    !(kind === 'number' || kind === 'paused') || !(flags & FLAG.EVAP_FAILING);
 
   const trend  = trendRate(history, now);          // 10-min rate, shown on screen
   const recent = trendRate(history, now, 4, 2);    // last few minutes: still rising?
@@ -148,23 +252,32 @@ function _render(root, data) {
     _set(root, 'rise', session.startCt !== null
       ? _signed(round1(ctEst) - round1(session.startCt)) + '°' : '—');
   }
-  _set(root, 'reason', _pauseReason(latest));
 
   // ── plan ──
   _set(root, 'planTitle', setup ? 'Setting up' : 'Your plan');
-  _set(root, 'action', setup
-    ? `Sit still for ${SETUP_MIN} minutes so Ember can learn your resting heart rate.`
-    : recommendedAction(status));
+  _set(root, 'action',
+    setup === 'needed' && session.baselineFailed
+                        ? 'Baseline didn\'t take. Check the sensors are flat against your skin, sit still and try again.' :
+    setup === 'needed'  ? `Sit still, then press Start baseline. EMB.R needs ${SETUP_MIN} quiet minutes to learn your resting heart rate.` :
+    setup === 'running' ? `Sit still for ${SETUP_MIN} minutes so EMB.R can learn your resting heart rate.` :
+    kind === 'offline'  ? 'EMB.R is not connected. Keep to your break and water plan until it is back.' :
+    kind === 'waiting' || kind === 'starting' ? 'EMB.R is getting a first reading. Carry on gently.' :
+                          recommendedAction(status));
 
-  _renderForecast(root, { status, setup, paused, ctEst, trend, recent, workMin, session, now });
-  _renderBreak(root, data, { status, setup, paused, onBreak, breakStartMs, breakTargetMin, now });
-  _renderWater(root, data, { status, setup, now });
+  // The first reading after a baseline still counts as setup for the schedule
+  const preWork = !!setup || kind === 'waiting' || kind === 'starting';
+  _renderForecast(root, { kind, status, setup, paused, ctEst, trend, recent, workMin, session, now });
+  _renderBreak(root, data, { status, setup: preWork, paused, onBreak, breakStartMs, breakTargetMin, now });
+  _renderWater(root, data, { status, setup: preWork, now });
 
-  _set(root, 'btn',
-    setup                       ? 'Capture baseline' :
+  const btn = root.querySelector('[data-field="btn"]');
+  btn.textContent =
+    setup === 'needed'          ? 'Start baseline' :
+    setup === 'running'         ? 'Baseline running' :
     onBreak                     ? 'End my break' :
     status === STATUS.ACT_NOW   ? 'I am stopping' :
-                                  'Start my break');
+                                  'Start my break';
+  btn.disabled = setup === 'running';
 
   // ── weather (real only; hidden when it didn't load) ──
   const w = data.weather;
@@ -176,33 +289,45 @@ function _render(root, data) {
     weatherEl.hidden = true;
   }
 
-  // ── vitals + chart ──
-  _set(root, 'hr',      hr      ? `${Math.round(hr)}` : '—');
-  _set(root, 'motion',  latest.actRms != null ? (latest.actRms > 0.35 ? 'moving' : 'still') : '—');
-  _set(root, 'skinNow', skinC   ? skinC.toFixed(1) : '—');
+  // ── vitals + chart (live values only while connected; battery is never shown) ──
+  const fresh = kind !== 'offline';
+  _set(root, 'hr',      fresh && hr ? `${Math.round(hr)}` : '—');
+  _set(root, 'hrq',     fresh && hr ? (HRQ_TEXT[latest.hrQuality] ?? '') : '');
+  _set(root, 'motion',  fresh && latest.activity != null ? (latest.activity >= MOVING_G ? 'moving' : 'still') : '—');
+  _set(root, 'skinNow', fresh && skinC ? skinC.toFixed(1) : '—');
   _drawChart(root, history, now);
 }
 
-function _renderForecast(root, { status, setup, paused, ctEst, trend, recent, workMin, session, now }) {
+function _renderForecast(root, { kind, status, setup, paused, ctEst, trend, recent, workMin, session, now }) {
   // Forecast only while rising over 10 min AND over the last few minutes,
   // so a peak that has turned over isn't reported as still climbing.
   const stillRising = !!recent && recent.ratePer10 >= 0.05;
   const A = fmtC(THRESHOLDS.ACT_NOW_C);
   let main, note;
-  if (setup) {
-    const left = session.setupStartMs !== null
-      ? Math.max(1, Math.ceil(SETUP_MIN - (now - session.setupStartMs) / MIN)) : SETUP_MIN;
+  if (setup === 'running') {
+    // Counted from the first frame with the baseline bit (the frame has no progress field)
+    const left = session.baselineStartMs !== null
+      ? Math.max(1, Math.ceil(SETUP_MIN - (now - session.baselineStartMs) / MIN)) : SETUP_MIN;
     main = `About ${left} min left in setup`;
-    note = 'Forecasts start once Ember knows your baseline.';
+    note = 'Forecasts start once EMB.R knows your baseline.';
+  } else if (setup === 'needed') {
+    main = session.baselineFailed ? 'Baseline didn\'t take' : 'Baseline not started';
+    note = 'Forecasts start once EMB.R knows your baseline.';
+  } else if (kind === 'offline') {
+    main = 'Forecast paused';
+    note = 'Forecasts restart when EMB.R reconnects.';
+  } else if (kind === 'waiting' || kind === 'starting') {
+    main = 'Forecast starts soon';
+    note = 'EMB.R needs a first reading.';
   } else if (paused) {
     main = 'Forecast paused';
     note = 'Forecasts restart when the sensors agree again.';
   } else if (status === STATUS.ACT_NOW) {
     main = stillRising ? `Over ${A} and still rising` : `Over ${A}`;
-    note = `Rest until Ember shows Watch or OK, at least ${SCHEDULE.actBreakMin} min.`;
+    note = `Rest until EMB.R shows Watch or OK, at least ${SCHEDULE.actBreakMin} min.`;
   } else if (workMin === null || workMin < FORECAST_MIN_DATA || !trend) {
     main = `Forecast starts after ${FORECAST_MIN_DATA} minutes`;
-    note = 'Ember needs a few minutes of your pace first.';
+    note = 'EMB.R needs a few minutes of your pace first.';
   } else {
     const r = stillRising ? forecastRange(ctEst, trend.ratePer10) : null;
     if (r) {
@@ -270,7 +395,9 @@ function _renderWater(root, data, { status, setup, now }) {
 }
 
 // ─── SVG chart (pure, no Chart.js) ───────────────────────────────────────────
-// Fixed 30-minute window ending now; one point per minute.
+// Fixed 30-minute window ending now; one point per minute. Lines break where
+// there was no number (Paused, disconnected): a gap is drawn as a gap, never
+// bridged with a straight line.
 function _drawChart(root, history, now) {
   const W = 310, H = 86;
   const pts = history.filter(h => h.t >= now - CHART_WINDOW_MIN * MIN);
@@ -286,14 +413,34 @@ function _drawChart(root, history, now) {
     return ((H - 4) - t * (H - 8)).toFixed(1);
   };
   const x = t => (W - ((now - t) / (CHART_WINDOW_MIN * MIN)) * W).toFixed(1);
-  const line = key => pts.filter(h => h[key] != null).map(h => `${x(h.t)},${y(h[key])}`).join(' ');
+  const xy = (h, key) => `${x(h.t)},${y(h[key])}`;
+  // A lone minute is drawn as a dot (zero-length segment with a round cap)
+  const lineD = key => _runs(pts, key)
+    .map(run => 'M' + (run.length === 1 ? [run[0], run[0]] : run).map(h => xy(h, key)).join('L'))
+    .join('');
+  const bandD = _runs(pts, 'ctHi', 'ctLo')
+    .map(run => 'M' + [...run.map(h => xy(h, 'ctHi')), ...[...run].reverse().map(h => xy(h, 'ctLo'))].join('L') + 'Z')
+    .join('');
 
-  const hi = pts.filter(h => h.ctHi != null).map(h => `${x(h.t)},${y(h.ctHi)}`);
-  const lo = pts.filter(h => h.ctLo != null).map(h => `${x(h.t)},${y(h.ctLo)}`).reverse();
+  root.querySelector('[data-field="chartBand"]').setAttribute('d', bandD);
+  root.querySelector('[data-field="chartCore"]').setAttribute('d', lineD('ctEst'));
+  root.querySelector('[data-field="chartSkin"]').setAttribute('d', lineD('skinC'));
+}
 
-  root.querySelector('[data-field="chartBand"]').setAttribute('points', [...hi, ...lo].join(' '));
-  root.querySelector('[data-field="chartCore"]').setAttribute('points', line('ctEst'));
-  root.querySelector('[data-field="chartSkin"]').setAttribute('points', line('skinC'));
+/** Split points into runs of consecutive minutes that all have `keys`. */
+function _runs(pts, ...keys) {
+  const runs = [];
+  let run = null, prevMinute = null;
+  for (const h of pts) {
+    const ok = keys.every(k => h[k] != null);
+    if (!ok || run === null || h.minute - prevMinute > 1) {
+      if (run && run.length) runs.push(run);
+      run = ok ? [] : null;
+    }
+    if (ok) { run.push(h); prevMinute = h.minute; }
+  }
+  if (run && run.length) runs.push(run);
+  return runs;
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -310,9 +457,18 @@ function _signed(n) {
 
 function _pauseReason(latest) {
   const flags = latest.flags ?? 0;
-  if (flags & 0x08) return 'Heart rate signal lost. Check the strap is wet and snug.';
-  if (flags & 0x01) return 'Your heart rate is up, but your body doesn\'t look like it\'s heating up.';
+  if (latest.starting)               return 'Pulse found again. The number comes back within a minute.';
+  if (flags & FLAG.STALE_HR)         return 'Pulse signal lost. Press the sensors flat against your skin.';
+  if (flags & FLAG.MOTIONLESS_TACHY) return 'Your heart rate is up, but your body doesn\'t look like it\'s heating up.';
   return 'Your sensors disagree right now.';
+}
+
+function _offlineReason({ source, link }) {
+  if (link === 'connecting')   return 'Connecting to EMB.R…';
+  if (link === 'reconnecting') return 'Lost the connection to EMB.R. Reconnecting…';
+  if (link === 'stalled')      return 'EMB.R has stopped sending. Check it is switched on and close by.';
+  if (source === 'demo')       return 'The demo is stopped. Connect EMB.R or restart the demo from the menu at the top.';
+  return 'Connect EMB.R from the menu at the top.';
 }
 
 function _confRows() {
@@ -337,6 +493,7 @@ function _template() {
     <div class="hero__status">
       <span class="hero__label" data-field="label">OK</span>
       <span class="hero__tag" data-field="tag" hidden></span>
+      <span class="hero__reason" data-field="tagReason" hidden></span>
     </div>
 
     <div data-when="number">
@@ -366,10 +523,12 @@ function _template() {
     </div>
 
     <div class="paused-msg" data-when="paused" hidden>
-      <h2>Can't estimate right now</h2>
+      <h2 data-field="pausedTitle">Can't estimate right now</h2>
       <strong data-field="reason">Your sensors disagree right now.</strong>
-      <p>Ember won't show a number it can't stand behind. It will come back on its own.</p>
+      <p data-field="pausedNote">EMB.R won't show a number it can't stand behind. It will come back on its own.</p>
     </div>
+
+    <p class="hero__note" data-field="evap" hidden>Your body is struggling to cool down.</p>
   </section>
 
   <div class="personal__body">
@@ -414,14 +573,14 @@ function _template() {
     <section class="card trend-card" aria-label="Last 30 minutes">
       <div class="trend-card__head">
         <strong>Last 30 min</strong>
-        <span>HR <span data-field="hr">—</span> bpm · <span data-field="motion">—</span></span>
+        <span>HR <span data-field="hr">—</span> bpm<span data-field="hrq"></span> · <span data-field="motion">—</span></span>
       </div>
       <div class="chart-wrap">
       <p class="chart-empty" data-field="chartEmpty">Collecting data…</p>
       <svg data-field="chartSvg" role="img" aria-label="Core estimate and its range compared with skin temperature" viewBox="0 0 310 86" preserveAspectRatio="none">
-        <polygon data-field="chartBand" fill="#0B1B2B" fill-opacity="0.08" points=""/>
-        <polyline data-field="chartCore" fill="none" stroke="#0B1B2B" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" points=""/>
-        <polyline data-field="chartSkin" fill="none" stroke="#0B5CAD" stroke-width="2" stroke-dasharray="5 4" stroke-linecap="round" points=""/>
+        <path data-field="chartBand" fill="#0B1B2B" fill-opacity="0.08" d=""/>
+        <path data-field="chartCore" fill="none" stroke="#0B1B2B" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" d=""/>
+        <path data-field="chartSkin" fill="none" stroke="#0B5CAD" stroke-width="2" stroke-dasharray="5 4" stroke-linecap="round" d=""/>
       </svg>
       </div>
       <div class="legend">
@@ -432,19 +591,19 @@ function _template() {
 
     <footer class="personal__foot">
       <span>This is an estimate, not a medical reading. Heart rate and history stay on your device.</span>
-      <a href="#how-sure" data-action="how-sure">How sure is Ember?</a>
+      <a href="#how-sure" data-action="how-sure">How sure is EMB.R?</a>
     </footer>
   </div>
 
   <dialog id="how-sure" class="sheet" aria-labelledby="how-sure-title">
     <div class="sheet__head">
-      <h2 id="how-sure-title">How sure is Ember?</h2>
+      <h2 id="how-sure-title">How sure is EMB.R?</h2>
       <button type="button" class="btn btn--secondary btn-sm" data-action="close-dialog">Close</button>
     </div>
-    <p>The ± is a 90% range: it is sized so your real core temperature should fall inside it about 9 times out of 10. It comes from comparing Ember's estimate with a core thermometer in 37 people, not from the filter's own guess, so it is honest about how wrong Ember can be.</p>
-    <p><strong>Measured coverage</strong>: tested on 37 people it had never seen (PROSPIE V3, chest heart-rate straps, 14,041 minutes), the true value was inside Ember's range <strong>${(CONF_MEASURED_COV * 100).toFixed(1)}%</strong> of the time. The filter's own "90%" range held only <strong>34%</strong> of the time.</p>
+    <p>The ± is a 90% range: it is sized so your real core temperature should fall inside it about 9 times out of 10. It comes from comparing EMB.R's estimate with a core thermometer in 37 people, not from the filter's own guess, so it is honest about how wrong EMB.R can be.</p>
+    <p><strong>Measured coverage</strong>: tested on 37 people it had never seen (PROSPIE V3, chest heart-rate straps, 14,041 minutes), the true value was inside EMB.R's range <strong>${(CONF_MEASURED_COV * 100).toFixed(1)}%</strong> of the time. The filter's own "90%" range held only <strong>34%</strong> of the time.</p>
     <p>It holds less well when you are very hot. When true core was ${fmtC(THRESHOLDS.ACT_NOW_C)} or more, the range held about 2 times in 3, because the estimate lags behind a fast rise. That is why Watch starts at ${fmtC(THRESHOLDS.WATCH_C)}.</p>
-    <p>When the sensors disagree, Ember pauses the number. From ${fmtC(THRESHOLDS.WATCH_C)} up it always shows the number, marked Low confidence.</p>
+    <p>When the sensors disagree, EMB.R pauses the number. From ${fmtC(THRESHOLDS.WATCH_C)} up it always shows the number, marked Low confidence.</p>
     <p>The ± depends on the estimate, from ± ${Math.min(...CONF_HALF).toFixed(1)}° to ± ${Math.max(...CONF_HALF).toFixed(1)}°:</p>
     <table class="sheet__table">
       <thead><tr><th>Estimate</th><th>Range</th></tr></thead>

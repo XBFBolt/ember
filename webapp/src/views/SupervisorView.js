@@ -20,7 +20,7 @@ const EVENTS = [
   },
   {
     time: '9:30 AM', type: 'Estimate unavailable', who: 'P. Mendes', open: false,
-    detail: 'Heart rate signal lost for 12 minutes, so Ember could not estimate and no alerts could fire for this worker.',
+    detail: 'Heart rate signal lost for 12 minutes, so EMB.R could not estimate and no alerts could fire for this worker.',
     resolved: 'Reconnected 9:44 AM.',
   },
 ];
@@ -137,7 +137,7 @@ function _render() {
           <span>45 on, 15 off</span>
         </div>
         <div class="breakplan__big"><strong>11:45</strong><span>next crew break · in 12 min</span></div>
-        <p>Set from today's heat index. Water and shade for everyone, about 500 ml per hour each. Ember suggests the schedule; you can change it.</p>
+        <p>Set from today's heat index. Water and shade for everyone, about 500 ml per hour each. EMB.R suggests the schedule; you can change it.</p>
       </section>
 
       <section class="card" aria-labelledby="crew-title">

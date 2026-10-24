@@ -4,7 +4,9 @@ Everything the app needs. The device does all the estimation; the app only
 decodes one 20-byte frame a second and shows it honestly.
 
 The reference implementation is `decode()` in `tools/ember_ble.py`. It is
-tested against the firmware's encoder byte for byte (`--selftest`).
+tested against the firmware's encoder byte for byte (`--selftest`). The
+webapp's port is `decodeFrame()` in `webapp/src/lib/frame.js`, tested on the
+same frames and against `ember_core.h` (`node --test tests/test_frame.mjs`).
 
 ## Connection
 

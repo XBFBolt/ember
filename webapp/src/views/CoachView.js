@@ -136,7 +136,7 @@ function _render() {
           <strong>6 min</strong>
           <span>to next team water break</span>
         </div>
-        <p>Bring it forward: ${_list(WATCH_NAMES)} could reach ${A} in the next 30 min. Each player gets 250 ml. Okafor, Brooks and Alvarez stay out until Ember shows Watch or OK.</p>
+        <p>Bring it forward: ${_list(WATCH_NAMES)} could reach ${A} in the next 30 min. Each player gets 250 ml. Okafor, Brooks and Alvarez stay out until EMB.R shows Watch or OK.</p>
         <div class="btn-row">
           <button type="button" class="btn btn--amber" data-demo="call-break">Call break now</button>
           <button type="button" class="btn btn--ghost-dark" data-demo="keep">Keep schedule</button>
@@ -152,7 +152,7 @@ function _render() {
         </div>
         <div class="todo__item">
           <span class="badge status--watch">Next 5 min</span>
-          <p>${_count(WATCH_NAMES.length)} over ${W}C and heating up. Call the water break early. Check on S. Kim in person: Ember can't tell if their high heart rate is heat.</p>
+          <p>${_count(WATCH_NAMES.length)} over ${W}C and heating up. Call the water break early. Check on S. Kim in person: EMB.R can't tell if their high heart rate is heat.</p>
         </div>
         <div class="todo__item">
           <span class="badge status--ok">Rest of practice</span>
