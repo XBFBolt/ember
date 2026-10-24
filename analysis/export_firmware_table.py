@@ -1,19 +1,19 @@
 """
 Export the fitted conformal intervals as a C header for the ESP32.
 
-This closes the loop. The number on your device's display stops being
-"1.96 times the square root of the Kalman variance" — a quantity that
-published coverage tests show means almost nothing — and becomes an
-interval that was calibrated against real rectal temperatures from real
-people, and whose coverage you measured.
+This closes the loop. The ± in the app stops being "1.96 times the square
+root of the Kalman variance" — a quantity that published coverage tests
+show means almost nothing — and becomes an interval that was calibrated
+against real rectal temperatures from real people, and whose coverage you
+measured.
 
-It also gives the device a refusal rule: if the calibrated interval at the
-current estimate is wider than REFUSE_ABOVE_C, show "cannot estimate"
-instead of a number.
+The table only gives the width of the range. It is not a refusal rule:
+since firmware 2.1 the device declines to show a number only on signal
+doubts (stateFromFlags in ember_core.h), never because the range is wide.
 
     python3 export_firmware_table.py --synthetic
     python3 export_firmware_table.py --data "Prospie dataset_open access V3.xlsx" \
-        --out ../firmware/conformal_table.h \
+        --out ../firmware/ember/conformal_table.h \
         --js-out ../webapp/src/lib/conformal_table.js
 
 Writes conformal_table.h (include it from the firmware) and, with --js-out,
@@ -33,7 +33,7 @@ import load_data
 import evaluate
 
 
-def build(df, n_strata=6, level=0.90, refuse_above=1.5):
+def build(df, n_strata=6, level=0.90):
     pred = evaluate.predict_all(df)
     pred = pred[pred["core_c"].notna()]   # fit only where there is a reference
 
@@ -51,8 +51,7 @@ def build(df, n_strata=6, level=0.90, refuse_above=1.5):
     return sc, edges, halves, cov, res
 
 
-def write_header(path, edges, halves, level, cov, n_subj, n_samp,
-                 refuse_above, source):
+def write_header(path, edges, halves, level, cov, n_subj, n_samp, source):
     lines = []
     A = lines.append
     A("/*")
@@ -77,8 +76,6 @@ def write_header(path, edges, halves, level, cov, n_subj, n_samp,
     A(f"#define CONF_LEVEL        {level:.2f}f")
     A(f"#define CONF_MEASURED_COV {cov:.4f}f")
     A(f"#define CONF_N_STRATA     {len(halves)}")
-    A(f"#define REFUSE_ABOVE_C    {refuse_above:.2f}f  "
-      "// half-width above which the device declines to show a number")
     A("")
     A("// Upper edge of each stratum, in predicted degrees C.")
     A("static const float CONF_EDGES[CONF_N_STRATA - 1] = {")
@@ -97,11 +94,6 @@ def write_header(path, edges, halves, level, cov, n_subj, n_samp,
     A("  return CONF_HALF[i];")
     A("}")
     A("")
-    A("// True when the device should refuse rather than display a number.")
-    A("static inline bool conformal_should_refuse(float ct_est) {")
-    A("  return conformal_half_width(ct_est) > REFUSE_ABOVE_C;")
-    A("}")
-    A("")
     A("#endif // CONFORMAL_TABLE_H")
 
     with open(path, "w") as fh:
@@ -110,7 +102,7 @@ def write_header(path, edges, halves, level, cov, n_subj, n_samp,
 
 
 def write_js(path, edges, halves, level, cov, n_subj, n_samp,
-             refuse_above, source, synthetic):
+             source, synthetic):
     """Same table as write_header, as an ES module for the webapp."""
     lines = []
     A = lines.append
@@ -135,8 +127,6 @@ def write_js(path, edges, halves, level, cov, n_subj, n_samp,
     A(f"export const CONF_LEVEL = {level:.2f};")
     A(f"export const CONF_MEASURED_COV = {cov:.4f};")
     A(f"export const CONF_N_STRATA = {len(halves)};")
-    A(f"export const REFUSE_ABOVE_C = {refuse_above:.2f}; "
-      "// half-width above which the device declines to show a number")
     A("")
     A("// Upper edge of each stratum, in predicted degrees C.")
     A("export const CONF_EDGES = [")
@@ -160,15 +150,6 @@ def write_js(path, edges, halves, level, cov, n_subj, n_samp,
     A("  }")
     A("  return CONF_HALF[i];")
     A("}")
-    A("")
-    A("/**")
-    A(" * True when the device should refuse rather than display a number.")
-    A(" * @param {number} ct_est - Estimated core temperature in degrees C")
-    A(" * @returns {boolean}")
-    A(" */")
-    A("export function conformalShouldRefuse(ct_est) {")
-    A("  return conformalHalfWidth(ct_est) > REFUSE_ABOVE_C;")
-    A("}")
 
     with open(path, "w") as fh:
         fh.write("\n".join(lines) + "\n")
@@ -180,8 +161,6 @@ def main():
     ap.add_argument("--synthetic", action="store_true")
     ap.add_argument("--level", type=float, default=0.90)
     ap.add_argument("--strata", type=int, default=6)
-    ap.add_argument("--refuse-above", type=float, default=1.5,
-                    help="half-width in C above which the device refuses")
     ap.add_argument("--out", default="conformal_table.h")
     ap.add_argument("--js-out", default=None,
                     help="also write the table as an ES module for the webapp, "
@@ -206,28 +185,18 @@ def main():
         sys.exit("give --data or --synthetic")
 
     sc, edges, halves, cov, res = build(
-        df, n_strata=args.strata, level=args.level,
-        refuse_above=args.refuse_above)
+        df, n_strata=args.strata, level=args.level)
 
     text = write_header(args.out, edges, halves, args.level, cov,
-                        res.subject.nunique(), len(res), args.refuse_above,
-                        source)
+                        res.subject.nunique(), len(res), source)
     print(text)
     print(f"\nwrote {args.out}")
 
     if args.js_out:
         write_js(args.js_out, edges, halves, args.level, cov,
-                 res.subject.nunique(), len(res), args.refuse_above,
-                 source, synthetic=args.synthetic)
+                 res.subject.nunique(), len(res), source,
+                 synthetic=args.synthetic)
         print(f"wrote {args.js_out}")
-
-    n_refuse = int(np.mean(
-        [h > args.refuse_above for h in
-         sc.half_width(res["pred"].to_numpy(), args.level)]) * 100)
-    print(f"\nAt REFUSE_ABOVE_C = {args.refuse_above:.2f}, the device would "
-          f"decline on about {n_refuse}% of samples.")
-    print("Tune that with the risk-coverage curve from evaluate.py, and be "
-          "ready to\ndefend the operating point you chose.")
 
 
 if __name__ == "__main__":

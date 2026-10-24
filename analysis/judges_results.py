@@ -432,7 +432,7 @@ def main():
     print("=" * 68)
     print("\n All analyses use leave-one-subject-out cross-validation on")
     print(" PROSPIE V3 (chest heart-rate sensors only, 6 conformal strata,")
-    print(" the same calibration as firmware/conformal_table.h).")
+    print(" the same calibration as firmware/ember/conformal_table.h).")
 
     res = load_results()
     print(f"\n {res.subject.nunique()} subjects, {len(res)} scored minutes, "

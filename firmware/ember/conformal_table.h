@@ -20,7 +20,6 @@
 #define CONF_LEVEL        0.90f
 #define CONF_MEASURED_COV 0.8967f
 #define CONF_N_STRATA     6
-#define REFUSE_ABOVE_C    1.50f  // half-width above which the device declines to show a number
 
 // Upper edge of each stratum, in predicted degrees C.
 static const float CONF_EDGES[CONF_N_STRATA - 1] = {
@@ -37,11 +36,6 @@ static inline float conformal_half_width(float ct_est) {
   int i = 0;
   while (i < CONF_N_STRATA - 1 && ct_est >= CONF_EDGES[i]) i++;
   return CONF_HALF[i];
-}
-
-// True when the device should refuse rather than display a number.
-static inline bool conformal_should_refuse(float ct_est) {
-  return conformal_half_width(ct_est) > REFUSE_ABOVE_C;
 }
 
 #endif // CONFORMAL_TABLE_H

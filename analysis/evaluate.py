@@ -20,9 +20,10 @@ Four results, all producible in one evening on openly licensed data:
      coverage separately for men and women with bootstrap intervals on the
      difference. Whatever the answer, nobody has published it.
 
-  4. A REFUSAL MODE. Because accuracy collapses in exactly the regime that
-     matters, the device should decline to answer when its own interval is
-     too wide. The risk-coverage curve is how you pick that threshold.
+  4. RISK-COVERAGE. How much accuracy is bought by answering only when the
+     interval is narrow. Reported for reference only: the shipped device
+     (firmware 2.1+) does not refuse on interval width. It refuses on signal
+     doubts below 38.0 C, and never at or above it (see ember_core.h).
 
 Run:
     python3 evaluate.py --synthetic

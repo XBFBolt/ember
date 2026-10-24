@@ -2,7 +2,7 @@
 
 **Analysis**: leave-one-subject-out (LOSO) on PROSPIE V3. Each person is scored by a calibration fitted on everyone else.
 **Data**: 37 participants with chest heart-rate data (Equivital ECG or Polar strap), 128 trials, 14,041 scored minutes against a rectal reference.
-**Calibration**: 6 conformal strata, the same table the firmware and webapp use (`firmware/conformal_table.h`).
+**Calibration**: 6 conformal strata, the same table the firmware and webapp use (`firmware/ember/conformal_table.h`).
 
 ---
 

@@ -7,7 +7,9 @@ import { THRESHOLDS } from './datastore.js';
  * (forecastRange). projectForward is kept for the Phase 2 filter-agreement
  * test; it is not used on screen.
  *
- * Constants mirror ember_firmware.ino exactly. Do not retype them.
+ * Coefficients mirror firmware/ember/ember_core.h exactly. Do not retype them.
+ * This mirror still steps every 5 s (the retired v1 firmware); v2 steps once
+ * a minute on the minute-mean heart rate.
  */
 
 // ─── ECTemp published params (Buller et al. 2013 / USARIEM TR T17-08) ────────

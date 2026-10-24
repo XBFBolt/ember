@@ -19,7 +19,6 @@ export const CONF_SYNTHETIC = false;
 export const CONF_LEVEL = 0.90;
 export const CONF_MEASURED_COV = 0.8967;
 export const CONF_N_STRATA = 6;
-export const REFUSE_ABOVE_C = 1.50; // half-width above which the device declines to show a number
 
 // Upper edge of each stratum, in predicted degrees C.
 export const CONF_EDGES = [
@@ -42,13 +41,4 @@ export function conformalHalfWidth(ct_est) {
     i++;
   }
   return CONF_HALF[i];
-}
-
-/**
- * True when the device should refuse rather than display a number.
- * @param {number} ct_est - Estimated core temperature in degrees C
- * @returns {boolean}
- */
-export function conformalShouldRefuse(ct_est) {
-  return conformalHalfWidth(ct_est) > REFUSE_ABOVE_C;
 }

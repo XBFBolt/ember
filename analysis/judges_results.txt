@@ -4,7 +4,7 @@
 
  All analyses use leave-one-subject-out cross-validation on
  PROSPIE V3 (chest heart-rate sensors only, 6 conformal strata,
- the same calibration as firmware/conformal_table.h).
+ the same calibration as firmware/ember/conformal_table.h).
 
  37 subjects, 14041 scored minutes, 128 trials
 

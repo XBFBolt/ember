@@ -94,7 +94,7 @@ The data is PROSPIE V3 (Loughborough, CC BY-NC 4.0): 40 participants, 9 heat con
 Reviewed Oct 24: evaluation now uses 6 strata, the same as the shipped table, so every judge number describes the calibration the device runs. All outputs regenerated.
 
 - [x] Rerun `evaluate.py` (chest only, the default) with `--prefix ember_chest`, output in `analysis/results_chest.txt`. Also `--hr-types all --prefix ember_all` → `results_all_hr_types.txt`.
-- [x] `export_firmware_table.py --out ../firmware/conformal_table.h --js-out ../webapp/src/lib/conformal_table.js` writes both tables from one run (`CONF_SYNTHETIC` false). The v2 copy goes in Phase 3.
+- [x] `export_firmware_table.py --out ../firmware/ember/conformal_table.h --js-out ../webapp/src/lib/conformal_table.js` writes both tables from one run (`CONF_SYNTHETIC` false). (Path updated in Phase 3; the table moved into the v2 firmware folder.)
 - [x] Results for judges, LOSO only (`judges_results.py` → `judges_results.txt`, `JUDGES_SUMMARY.md`, `RESULTS_ONE_PAGER.md`):
   - [x] coverage of the 90% range: Kalman vs conformal (headline: 34% vs 90%; exact 34.3% vs 89.7%)
   - [x] coverage by true temperature band (<37.5, 37.5–38, 38–38.5, ≥38.5): 98 / 95 / 86 / 67%
@@ -116,14 +116,28 @@ The range under-covers when core rises fast (84.9%) and at true core ≥ 38.5 (6
 
 Copy `ember_v2/` into this repo (`firmware/ember/`, `tests/`, `tools/`, `cad/`, `docs/APP_INTERFACE.md`, guide). Retire `firmware/ember_firmware.ino`. Every fix goes in `ember_core.h` with a unit test; all tests must pass.
 
-**Note**: Copy `firmware/conformal_table.h` to `firmware/ember/conformal_table.h` (generated in Phase 2, needs to be in the v2 firmware directory), or rerun the export with `--out ../firmware/ember/conformal_table.h`. Check the v2 firmware's include expects the same names (`CONF_EDGES`, `CONF_HALF`, `conformal_half_width`).
+Done Oct 24: v2 copied in, `firmware/ember_firmware.ino` deleted, and the real Phase 2 table moved to `firmware/ember/conformal_table.h` (the v2 package shipped a synthetic one; names match). Firmware is now **v2.1** so `ID` shows whether the team flashed the fixed build.
 
-- [ ] **Never REFUSE at ≥ 38.0°C.** `stateFromFlags` takes the estimate; from 38.0 up the worst state is CAUTION, and the frame still carries the number and ± (inflated while coasting).
-- [ ] **Cadence check rejects real running heart rate.** At 160–180 steps/min the pulse genuinely matches cadence (the test suite's own example: HR 162.6 vs cadence 162). Only reject a channel when its heart rate jumped to cadence (vs the last minute's fused HR) or disagrees with the other channel, not just because the two match.
-- [ ] **Grace period for "high HR while still":** skip `F_MOTIONLESS_TACHY` for 10 min after the last activity, and whenever the estimate is ≥ 38.0.
-- [ ] Remove the width-based refusal (`F_WIDE_INTERVAL`); keep bit 0x0010 reserved.
-- [ ] Recheck which flags make CAUTION. Uncalibrated thermistors or a missing SHT40 shouldn't put the heart-rate estimate in Low confidence forever; make them info-only.
-- [ ] Rebuild and run `tests/` and `tools/ember_ble.py --selftest`. Send the team the updated folder.
+- [x] **Never REFUSE at ≥ 38.0°C.** `stateFromFlags(flags, ctEst)`; from 38.0 (`CT_WATCH_C`) up the worst state is CAUTION, and the frame still carries the number and ± (inflated while coasting).
+- [x] **Cadence check rejects real running heart rate.** At 160–180 steps/min the pulse genuinely matches cadence (the test suite's own example: HR 162.6 vs cadence 162). Only reject a channel when its heart rate jumped to cadence (vs the last minute's fused HR) or disagrees with the other channel, not just because the two match.
+  - New `cadenceCheck()` runs on both channels before fusion. Jump = more than 15 bpm from the last good minute. With no recent good minute it still rejects, since bounce and heart look the same then.
+  - [x] Fixed (review): one lost minute with the heart on the step rate left no reference, so every later second was rejected and the app went Paused mid-workout. `HrReference` now remembers the last good minute through up to 3 lost minutes. Unit test reproduces the stuck case.
+  - **Hardware note:** an ECG chest strap (Polar H10 class) would remove this whole problem. It reads the heart's electrical signal, so the bounce can't fake a beat, and it matches the chest-ECG data the calibration came from. The v2 BOM is fixed for the hackathon, so this is software for now; worth it for any next version.
+- [x] **Grace period for "high HR while still":** skip `F_MOTIONLESS_TACHY` for 10 min after the last activity, and whenever the estimate is ≥ 38.0.
+  - "Activity" = smoothed activity ≥ `ACT_MOVING_G` (0.05 g), the same threshold the cadence check uses.
+- [x] Remove the width-based refusal (`F_WIDE_INTERVAL`); keep bit 0x0010 reserved (`F_RESERVED_0010`). The leftover `REFUSE_ABOVE_C` and "should refuse" helper are gone from `export_firmware_table.py` and both generated tables (regenerated; the numbers didn't change).
+- [x] Recheck which flags make CAUTION. Uncalibrated thermistors or a missing SHT40 shouldn't put the heart-rate estimate in Low confidence forever; make them info-only.
+  - Info only now: `NOT_CALIBRATED`, `NO_MICRO`, `SKIN_DISAGREE` (and `SKIN_SINGLE`, `LOW_BATT` as before). CAUTION only from doubts about the heart rate or its starting point: `NO_BASELINE`, `BASELINE_RUNNING`, `PPG_SINGLE`, `PPG_DISAGREE`, `CADENCE_LOCK`, or one confound doubt.
+  - Reason order changed so an info-only flag never masks the real reason. `ember_ble.py` and `APP_INTERFACE.md` match; `--selftest` now checks the order against `ember_core.h`.
+- [x] Fixed (review): **no motion sensor made exercise look like sitting still.** Activity reads 0, so "high HR while still" fired for the whole workout. The stillness check now stands down when the IMU wasn't found at boot (no free flag bit to report it; `ID` and `SCAN` show it).
+- [x] Fixed (review): **BASELINE at 38.0 or above** reset the estimate to ≤ 37.6 and hid it for a minute. The firmware now ignores BASELINE at or above 38.0, and cancels a baseline that ends there. The app side is in Phase 4.
+- [x] Rebuild and run `tests/` (163 pass) and `tools/ember_ble.py --selftest` (passes). Sketch type-checks against the host stubs.
+- [x] **Compiled for the ESP32-S3** on Dillon's Mac: esp32 core 3.3.12 via the Arduino IDE's `arduino-cli`, board `esp32:esp32:esp32s3`, both USB settings (CDC on boot off and on). No errors, no warnings, 48–49 % flash, 14 % RAM. One fix needed: core 3.3 uses NimBLE, which adds the notify descriptor itself and deprecates `BLE2902`, so that line is now Bluedroid-only. The guide now pins core 3.3.12. Not yet run on a board: the team's P0 flash is still the real test.
+  - Recompile: `"/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli" compile --fqbn esp32:esp32:esp32s3 --warnings all firmware/ember`
+- [x] Decided (review): **skin doubts before CAL.** Uncalibrated beads can read > 1 °C low, and skin fed two doubts (< 33 °C, < 31 °C), so a cool, dry room could pause a good estimate. Both options taken:
+  - Firmware: no skin doubts until `CAL` has run. Cost: on an uncalibrated unit, "coffee at a desk" is one doubt (Low confidence), not two (Cannot estimate). `EVAP_FAILING` stays on.
+  - Demo: `CAL` is a required step before recording or presenting (Phase 5 and 7), so the full Cannot estimate behaviour is live on stage.
+- [ ] Send the team the updated folder.
 
 ## Phase 4 · Hookup: webapp ↔ device over Bluetooth (tonight, Sat)
 
@@ -135,6 +149,7 @@ The device sends one 20-byte frame a second over BLE (`docs/APP_INTERFACE.md`). 
 - [ ] Personal view for v2:
   - [ ] Paused message for 0x08: "Pulse signal lost. Press the sensors flat against your skin."
   - [ ] "Setting up" countdown driven by the baseline-running bit (300 s), with "Start baseline" sending `BASELINE`
+  - [ ] Only show the baseline button during setup, never mid-session. A mid-session baseline resets the estimate and hides it for a minute (the firmware already ignores it at 38.0 or above).
   - [ ] "Starting…" for the first minute after connect or baseline (no number yet), not "signal lost"
   - [ ] show the CAUTION reason next to "Low confidence" (e.g. "one pulse sensor only")
   - [ ] 0x80: a calm "Your body is struggling to cool down" line, no sweat wording
@@ -147,6 +162,8 @@ The device sends one 20-byte frame a second over BLE (`docs/APP_INTERFACE.md`). 
 
 - [ ] **Replay mode:** record frames to a file (`ember_ble.py --csv`) and play them back in the webapp at 1× or 10×. Button in the connection menu.
 - [ ] Record 2–3 real sessions with the team: 5 min baseline, 12 min hard work, 10 min recovery. Keep the best one in `demo/`.
+  - **Run `CAL` first** (build guide P6). `ID` must say "thermistor calibration: yes"; until then the skin checks are off and "Cannot estimate" can't fire on skin.
+  - Pick hard work whose step rate is far from the heart rate: step-ups around 100/min, or cycling. Running puts cadence and heart rate both near 160, the case where pulse sensors are easiest to fool.
 - [ ] Bluetooth drop: the app shows "Disconnected · reconnecting", keeps history, resumes.
 - [ ] Load test: leave the app connected 30 min; no slowdown, no memory growth.
 - [ ] Coach view (optional): show the live wearer as one player card; the rest stay static examples.
@@ -158,7 +175,7 @@ The device sends one 20-byte frame a second over BLE (`docs/APP_INTERFACE.md`). 
 - [ ] Limits stated in the app and slides: calibrated on chest heart rate, not pulse sensors; estimate lags true core (give the measured lag); not a medical device.
 - [ ] Privacy: data stays on the device and laptop, nothing uploaded; supervisor sees alerts only. Check the webapp sends nothing anywhere except the optional weather lookup.
 - [ ] Fairness: show the men vs women result honestly, whatever it is.
-- [ ] Docs: README, HANDOFF, BOM, BUILD_PLAN describe v2; remove synthetic claims ("26%", "16 participants", "coverage verified"); soften SCIENCE.md "skin falls".
+- [ ] Docs: README, BOM, BUILD_PLAN describe v2 (HANDOFF, the build guides and the Kiro steering file were brought up to v2.1 on Oct 24; `BOM.md` is marked frozen in the steering file, so decide before editing it); remove synthetic claims ("26%", "16 participants", "coverage verified"); soften SCIENCE.md "skin falls".
 - [ ] Break schedule: pick a cited source (TB MED 507 or NIOSH 2016-106) or label 20/5 and 250 ml as placeholders on screen.
 
 ## Phase 7 · Freeze and present (Sun morning)
@@ -168,6 +185,7 @@ The device sends one 20-byte frame a second over BLE (`docs/APP_INTERFACE.md`). 
 - [ ] Backup video of the full demo; the replay file loaded and tested on the presenting laptop.
 - [ ] Rehearse twice, once with someone new; time it.
 - [ ] Presenting laptop: Chrome, Bluetooth on, webapp served locally, browser zoom set for the projector, notifications off.
+- [ ] Demo unit: `ID` shows firmware v2.1 and "thermistor calibration: yes". If not, run `CAL` (P6) before going on stage.
 
 ## Hardware checkpoints the software depends on
 
