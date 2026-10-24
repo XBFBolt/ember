@@ -108,7 +108,7 @@ def predict_all(df, personalise_ct0=True):
     return pd.concat(out, ignore_index=True)
 
 
-def loso(df, n_strata=5, seed=0):
+def loso(df, n_strata=6, seed=0):
     """
     Leave one subject out. For each held-out subject, the conformal
     calibration is fitted on the OTHER subjects only - never on the test
@@ -239,7 +239,8 @@ def report(res, label=""):
         # group difference, bias detected it and RMSE missed it completely.
         # An audit run on RMSE alone would conclude the model is fair.
         for key, name in (("bias", "BIAS"), ("rmse", "RMSE")):
-            bd = bootstrap_group_diff(res, key)
+            # Same resamples and seed as judges_results.py, so both report one CI.
+            bd = bootstrap_group_diff(res, key, n_boot=5000, seed=42)
             if not bd:
                 continue
             a, b = bd["groups"]
@@ -404,8 +405,12 @@ def main():
     ap.add_argument("--synthetic", action="store_true")
     ap.add_argument("--no-personalise", action="store_true",
                     help="use a fixed CT0 of 37.1 for everyone")
-    ap.add_argument("--strata", type=int, default=5)
-    ap.add_argument("--prefix", default="ember")
+    # 6 matches export_firmware_table.py, so the numbers reported here describe
+    # the table the device and webapp actually use.
+    ap.add_argument("--strata", type=int, default=6)
+    # Default matches the default --hr-types (chest), so a plain run never
+    # overwrites the all-sensor comparison (run that with --prefix ember_all).
+    ap.add_argument("--prefix", default="ember_chest")
     ap.add_argument("--no-plot", action="store_true")
     ap.add_argument("--hr-types", default="2,3",
                     help="HR sensor types to use: 1 finger PPG, 2 Equivital chest, "

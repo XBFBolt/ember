@@ -2,7 +2,7 @@
  * conformal_table.js - calibrated prediction intervals for Ember
  *
  * GENERATED FILE. Do not edit by hand; rerun export_firmware_table.py.
- * generated      2026-10-23
+ * generated      2026-10-24
  * source data    Prospie dataset_open access V3.xlsx (HR: Equivital chest ECG, Polar chest strap)
  * calibration    37 subjects, 14041 samples
  * nominal level  90%

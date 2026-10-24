@@ -12,9 +12,12 @@ current estimate is wider than REFUSE_ABOVE_C, show "cannot estimate"
 instead of a number.
 
     python3 export_firmware_table.py --synthetic
-    python3 export_firmware_table.py --data "Prospie dataset_open access V3.xlsx"
+    python3 export_firmware_table.py --data "Prospie dataset_open access V3.xlsx" \
+        --out ../firmware/conformal_table.h \
+        --js-out ../webapp/src/lib/conformal_table.js
 
-Writes conformal_table.h. Include it from the firmware.
+Writes conformal_table.h (include it from the firmware) and, with --js-out,
+the same table for the webapp.
 """
 
 import argparse
@@ -106,6 +109,71 @@ def write_header(path, edges, halves, level, cov, n_subj, n_samp,
     return "\n".join(lines)
 
 
+def write_js(path, edges, halves, level, cov, n_subj, n_samp,
+             refuse_above, source, synthetic):
+    """Same table as write_header, as an ES module for the webapp."""
+    lines = []
+    A = lines.append
+    A("/*")
+    A(" * conformal_table.js - calibrated prediction intervals for Ember")
+    A(" *")
+    A(" * GENERATED FILE. Do not edit by hand; rerun export_firmware_table.py.")
+    A(f" * generated      {date.today().isoformat()}")
+    A(f" * source data    {source}")
+    A(f" * calibration    {n_subj} subjects, {n_samp} samples")
+    A(f" * nominal level  {level:.0%}")
+    A(f" * MEASURED coverage under leave-one-subject-out: {cov:.1%}")
+    A(" *")
+    A(" * The half-widths below are quantiles of the absolute error measured")
+    A(" * against a rectal reference, binned by predicted temperature. They")
+    A(" * are NOT derived from the Kalman posterior variance, which published")
+    A(" * coverage tests show is badly miscalibrated for this model.")
+    A(" */")
+    A("")
+    A(f"export const CONF_SYNTHETIC = {'true' if synthetic else 'false'};")
+    A("")
+    A(f"export const CONF_LEVEL = {level:.2f};")
+    A(f"export const CONF_MEASURED_COV = {cov:.4f};")
+    A(f"export const CONF_N_STRATA = {len(halves)};")
+    A(f"export const REFUSE_ABOVE_C = {refuse_above:.2f}; "
+      "// half-width above which the device declines to show a number")
+    A("")
+    A("// Upper edge of each stratum, in predicted degrees C.")
+    A("export const CONF_EDGES = [")
+    A("  " + ", ".join(f"{e:.4f}" for e in edges))
+    A("];")
+    A("")
+    A("// Interval half-width for each stratum, in degrees C.")
+    A("export const CONF_HALF = [")
+    A("  " + ", ".join(f"{h:.4f}" for h in halves))
+    A("];")
+    A("")
+    A("/**")
+    A(" * Half-width of the calibrated interval at this estimate.")
+    A(" * @param {number} ct_est - Estimated core temperature in degrees C")
+    A(" * @returns {number} Half-width in degrees C")
+    A(" */")
+    A("export function conformalHalfWidth(ct_est) {")
+    A("  let i = 0;")
+    A("  while (i < CONF_N_STRATA - 1 && ct_est >= CONF_EDGES[i]) {")
+    A("    i++;")
+    A("  }")
+    A("  return CONF_HALF[i];")
+    A("}")
+    A("")
+    A("/**")
+    A(" * True when the device should refuse rather than display a number.")
+    A(" * @param {number} ct_est - Estimated core temperature in degrees C")
+    A(" * @returns {boolean}")
+    A(" */")
+    A("export function conformalShouldRefuse(ct_est) {")
+    A("  return conformalHalfWidth(ct_est) > REFUSE_ABOVE_C;")
+    A("}")
+
+    with open(path, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data")
@@ -115,6 +183,9 @@ def main():
     ap.add_argument("--refuse-above", type=float, default=1.5,
                     help="half-width in C above which the device refuses")
     ap.add_argument("--out", default="conformal_table.h")
+    ap.add_argument("--js-out", default=None,
+                    help="also write the table as an ES module for the webapp, "
+                         "e.g. ../webapp/src/lib/conformal_table.js")
     ap.add_argument("--hr-types", default="2,3",
                     help="HR sensor types: 1 finger PPG, 2 Equivital chest, 3 Polar "
                          "chest; 'all' for every type (default 2,3: chest only)")
@@ -143,6 +214,12 @@ def main():
                         source)
     print(text)
     print(f"\nwrote {args.out}")
+
+    if args.js_out:
+        write_js(args.js_out, edges, halves, args.level, cov,
+                 res.subject.nunique(), len(res), args.refuse_above,
+                 source, synthetic=args.synthetic)
+        print(f"wrote {args.js_out}")
 
     n_refuse = int(np.mean(
         [h > args.refuse_above for h in

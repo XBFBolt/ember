@@ -58,10 +58,10 @@ loaded Prospie dataset_open access V3.xlsx
 ====================================================================
    nominal |   Kalman   width | conformal   width
   --------------------------------------------------
-      0.50 |    0.135   0.143 |     0.500   0.543
-      0.80 |    0.254   0.272 |     0.794   1.106
-      0.90 |    0.328   0.349 |     0.894   1.435
-      0.95 |    0.386   0.416 |     0.945   1.710
+      0.50 |    0.135   0.143 |     0.500   0.545
+      0.80 |    0.254   0.272 |     0.795   1.105
+      0.90 |    0.328   0.349 |     0.895   1.428
+      0.95 |    0.386   0.416 |     0.945   1.724
 
   A 90% interval that covers far less than 90% of the time is
   worse than no interval, because a user acts on it.
@@ -69,14 +69,14 @@ loaded Prospie dataset_open access V3.xlsx
 ====================================================================
  3. DOES IT WORK EQUALLY WELL FOR EVERYONE?
 ====================================================================
-  F  n_subj=17  RMSE 0.453  bias -0.172  R^2 +0.257  90% coverage 0.867
-  M  n_subj=21  RMSE 0.418  bias -0.211  R^2 +0.476  90% coverage 0.907
+  F  n_subj=17  RMSE 0.453  bias -0.172  R^2 +0.257  90% coverage 0.872
+  M  n_subj=21  RMSE 0.418  bias -0.211  R^2 +0.476  90% coverage 0.904
 
   BIAS difference (M minus F): -0.039 C <- primary
-    bootstrap 95% CI over subjects [-0.206, +0.146]  includes zero
+    bootstrap 95% CI over subjects [-0.217, +0.152]  includes zero
 
   RMSE difference (M minus F): -0.035 C
-    bootstrap 95% CI over subjects [-0.146, +0.079]  includes zero
+    bootstrap 95% CI over subjects [-0.151, +0.076]  includes zero
 
   Note on metric choice: a systematic offset between groups
   shows up in BIAS and barely moves RMSE. Audit on bias, or
@@ -87,24 +87,24 @@ loaded Prospie dataset_open access V3.xlsx
   ran no sex analysis; several others had none at all.
 
   By heart-rate sensor (trial's main sensor):
-    finger PPG           n_subj=15  n= 3271  RMSE 0.539  bias -0.407  90% coverage 0.806
+    finger PPG           n_subj=15  n= 3271  RMSE 0.539  bias -0.407  90% coverage 0.809
     Equivital chest ECG  n_subj=23  n=11084  RMSE 0.368  bias -0.090  90% coverage 0.932
-    Polar chest strap    n_subj=14  n= 2841  RMSE 0.510  bias -0.335  90% coverage 0.849
+    Polar chest strap    n_subj=14  n= 2841  RMSE 0.510  bias -0.335  90% coverage 0.847
 
 ====================================================================
  4. WHEN SHOULD THE DEVICE REFUSE TO ANSWER?
 ====================================================================
    answered    RMSE     MAE   width threshold
-       100%   0.431   0.337   <= 0.825 C
-        82%   0.452   0.356   <= 0.796 C
-        63%   0.448   0.354   <= 0.771 C
-        45%   0.433   0.343   <= 0.704 C
-        26%   0.472   0.374   <= 0.646 C
+       100%   0.431   0.337   <= 0.831 C
+        82%   0.436   0.342   <= 0.789 C
+        63%   0.434   0.345   <= 0.749 C
+        45%   0.426   0.341   <= 0.704 C
+        26%   0.445   0.353   <= 0.637 C
 
   Pick the operating point deliberately and defend it. A device
   that answers 70% of the time and is right when it does beats one
   that always answers and is sometimes badly wrong.
 
-wrote ember_results.png
-wrote ember_by_sex.png
-wrote ember_predictions.csv and ember_summary.json
+wrote ember_all_results.png
+wrote ember_all_by_sex.png
+wrote ember_all_predictions.csv and ember_all_summary.json

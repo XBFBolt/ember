@@ -91,21 +91,32 @@ Order: 1. Interface (done) → 2. Data → 3. Firmware v2 fixes → 4. Hookup �
 
 The data is PROSPIE V3 (Loughborough, CC BY-NC 4.0): 40 participants, 9 heat conditions, one row per minute, rectal core temperature. Loader checked Oct 23: correct columns, 9999 = missing, minutes kept contiguous, chest heart-rate sensors only (Equivital ECG + Polar; finger PPG excluded), participants 17 and 18 have conflicting sex codes so they're excluded from the by-sex analysis.
 
-- [x] Rerun `evaluate.py` (chest only, the default) and save the output to `analysis/results_chest.txt`. Also run `--hr-types all` for comparison.
-- [x] Rerun `export_firmware_table.py` writing to `firmware/ember/conformal_table.h`, and write the same table to `webapp/src/lib/conformal_table.js` (webapp imports it; set `CONF_SYNTHETIC` false).
-- [x] Results for judges, LOSO only:
-  - [x] coverage of the 90% range: Kalman vs conformal (headline: 33% vs 89%)
-  - [x] coverage by true temperature band (<37.5, 37.5–38, 38–38.5, ≥38.5)
-  - [x] lag at the limits: minutes from true core reaching 38.5 to Watch (38.0) and Act now (38.5) firing; how often Watch fired first
+Reviewed Oct 24: evaluation now uses 6 strata, the same as the shipped table, so every judge number describes the calibration the device runs. All outputs regenerated.
+
+- [x] Rerun `evaluate.py` (chest only, the default) with `--prefix ember_chest`, output in `analysis/results_chest.txt`. Also `--hr-types all --prefix ember_all` → `results_all_hr_types.txt`.
+- [x] `export_firmware_table.py --out ../firmware/conformal_table.h --js-out ../webapp/src/lib/conformal_table.js` writes both tables from one run (`CONF_SYNTHETIC` false). The v2 copy goes in Phase 3.
+- [x] Results for judges, LOSO only (`judges_results.py` → `judges_results.txt`, `JUDGES_SUMMARY.md`, `RESULTS_ONE_PAGER.md`):
+  - [x] coverage of the 90% range: Kalman vs conformal (headline: 34% vs 90%; exact 34.3% vs 89.7%)
+  - [x] coverage by true temperature band (<37.5, 37.5–38, 38–38.5, ≥38.5): 98 / 95 / 86 / 67%
+  - [x] lag at the limits: when true core first hit 38.5, Watch was already on in 47/73 trials, Act now in 18/73; Act now never fired in 34/73; Watch was the only alert in 29/73, neither fired in 5/73
   - [x] men vs women: bias difference with bootstrap CI
   - [x] optional: rising vs steady coverage
-- [x] Three figures (`figures/`): coverage bars (Kalman vs conformal), estimate vs true over one trial with the ± band, lag histogram. Large fonts, readable on a projector.
+- [x] Three figures (`figures/`, written by `make_judge_figures.py`): coverage bars (Kalman vs conformal), estimate vs true over one trial with the ± band, alert timing (already on / late / never). Large fonts, readable on a projector.
 - [x] Put the real headline numbers on the webapp "How sure is Ember?" sheet; remove the synthetic note.
 - [ ] Optional: read the spreadsheet's red (interpolated) cells with openpyxl and report how many scored minutes were interpolated.
+
+### Possible improvements (not scheduled)
+
+The range under-covers when core rises fast (84.9%) and at true core ≥ 38.5 (67%), because the estimate lags and reads low.
+- **Tried, doesn't help:** a separate ± while the estimate is rising. Rising coverage stayed at about 85% or dropped to 80%. The estimate isn't rising fast at the moments the truth is.
+- **Helps a little:** a lopsided range, since misses are almost always on the high side: about 0.3° below the estimate and 0.85° above, instead of ± 0.7. Rising coverage 85.6%, coverage at ≥ 38.5 went from 67% to 73%, and the range is narrower overall. Cost: the device sends a low and a high instead of one ± (firmware, BLE frame, app).
+- **The real fix is the lag itself**, in the filter, not the range. Out of scope for the hackathon.
 
 ## Phase 3 · Firmware v2 fixes (tonight, before the team flashes)
 
 Copy `ember_v2/` into this repo (`firmware/ember/`, `tests/`, `tools/`, `cad/`, `docs/APP_INTERFACE.md`, guide). Retire `firmware/ember_firmware.ino`. Every fix goes in `ember_core.h` with a unit test; all tests must pass.
+
+**Note**: Copy `firmware/conformal_table.h` to `firmware/ember/conformal_table.h` (generated in Phase 2, needs to be in the v2 firmware directory), or rerun the export with `--out ../firmware/ember/conformal_table.h`. Check the v2 firmware's include expects the same names (`CONF_EDGES`, `CONF_HALF`, `conformal_half_width`).
 
 - [ ] **Never REFUSE at ≥ 38.0°C.** `stateFromFlags` takes the estimate; from 38.0 up the worst state is CAUTION, and the frame still carries the number and ± (inflated while coasting).
 - [ ] **Cadence check rejects real running heart rate.** At 160–180 steps/min the pulse genuinely matches cadence (the test suite's own example: HR 162.6 vs cadence 162). Only reject a channel when its heart rate jumped to cadence (vs the last minute's fused HR) or disagrees with the other channel, not just because the two match.
@@ -163,6 +174,7 @@ The device sends one 20-byte frame a second over BLE (`docs/APP_INTERFACE.md`). 
 - [ ] Fri night: v2 compiles and flashes (P0); phone or laptop sees "Ember" frames.
 - [ ] Sat midday: breadboard gate passed (P2); both pulse sensors AGREED on fingertips.
 - [ ] Sat afternoon: worn test passed (P7); baseline succeeds; first app connection (P8).
+- [ ] Sat afternoon, quick sanity check: pulse-sensor heart rate vs a smartwatch or a 30 s manual count, at rest and during work. Every 4 bpm off moves the estimate about 0.1 °C.
 - [ ] Sat evening: demo session recorded for replay.
 
 ## Cut list (if behind, cut from the top)

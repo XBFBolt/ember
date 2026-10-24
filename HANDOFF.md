@@ -9,7 +9,6 @@ A chest-strap device that estimates core body temperature from heart rate, and i
 My computer is linked; the project is at `/Users/dillon/Hackathon/ember/`:
 
 - `TODO.md`: the working list, in three phases: **1. Interface → 2. Data → 3. Hookup.** We're in Phase 1. Ticked items are done.
-- `KIRO_PROMPTS.md`: short prompts for each Phase 1 fix (I use Kiro for some edits).
 - `webapp/`: the app being fixed. Plain ES modules, no build step. Open `index.html` over a local server (modules don't load from `file://`). Key files: `src/lib/datastore.js` (state, thresholds, `fmtC()`), `src/lib/serial.js` (Web Serial + demo simulation), `src/lib/estimator.js`, `src/views/PersonalView.js`, `CoachView.js`, `SupervisorView.js`, `src/styles/main.css`.
 - `design-export/`: the reference HTML/CSS/JS for the final design.
 - `firmware/ember_firmware.ino`, `firmware/conformal_table.h`, `analysis/` (Python), `docs/`: Phase 2, don't touch yet.

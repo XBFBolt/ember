@@ -1,108 +1,80 @@
 # Ember Results: One Page for Slides
 
----
-
-## The Problem
-
-Published algorithms report **"90% confidence intervals"** for core temperature estimates. Independent testing found these intervals **badly miscalibrated**.
-
-An interval that claims 90% and delivers far less is **worse than no interval** — users act on it.
+All numbers: PROSPIE V3, 37 people, chest heart rate, leave-one-subject-out, 14,041 minutes against a rectal reference.
 
 ---
 
-## Our Solution: Conformal Calibration
+## The problem
 
-We replaced the Kalman filter's uncalibrated variance with **stratified split conformal prediction**.
+The Kalman filter behind this algorithm comes with its own variance, and it is natural to show it as a "90%" range. We measured how often that range actually contains the true core temperature.
 
-### Result
+## The result
 
-| Method | Claimed | Actual Coverage |
+| | Promised | Measured |
 |---|---|---|
-| **Kalman "90%" interval** | 90% | **34%** |
-| **Ember conformal interval** | 90% | **90%** |
+| Kalman "90%" range | 90% | **34%** |
+| Ember calibrated range | 90% | **90%** (89.7%) |
 
-**Headline**: The published method's "90%" interval covered **only 34%** of true values. Ember delivers **90%**.
+Ember replaces the Kalman variance with stratified split conformal intervals, fitted on other people and tested on someone new.
 
 ---
 
-## Where It Fails Most
+## Where it is weakest
 
-The uncalibrated interval is **worst at elevated core temperatures** — exactly where accuracy matters:
-
-| True Core Temp | Kalman | Conformal |
+| True core | Kalman | Ember |
 |---|---|---|
-| Normal (<37.5°C) | 36% | 98% |
-| Warm (37.5-38.0°C) | 40% | 95% |
-| **Watch (38.0-38.5°C)** | 31% | 85% |
-| **Act Now (≥38.5°C)** | **24%** | 67% |
+| Under 37.5 °C | 36% | 98% |
+| 37.5–38.0 °C | 40% | 95% |
+| 38.0–38.5 °C | 31% | 86% |
+| 38.5 °C and up | **24%** | **67%** |
 
-At Act Now temperatures (≥38.5°C), the Kalman interval is **essentially useless**.
-
----
-
-## Alert Timing: The Estimate Lags
-
-We measured the delay from when **true core reached 38.5°C** to when alerts fired (73 trials):
-
-- **Watch (38.0°C)**: median lag **0 min** (fires early or on time in half of trials)
-- **Act Now (38.5°C)**: median lag **1 min**, but never fired in **47% of trials**
-
-**Implication**: A single 38.5°C threshold would be unsafe. The **two-tier design** (Watch + Act Now) works because **Watch carries the safety load**.
+At 38.5 °C and up, Ember's range holds about two times in three, not nine in ten. The estimate lags a fast rise and reads low. We say so.
 
 ---
 
-## Fairness: Men vs Women
+## How late is the alarm?
 
-**Question**: Does the algorithm work equally well for everyone?
+73 trials reached a true core of 38.5 °C. At that minute:
 
-| Sex | Subjects | Bias | RMSE |
+- **Watch (38.0 °C) was already on in 47 (64%)**, for a median of 13 minutes. 21 came on later (median 14 min late). 5 never did.
+- **Act now (38.5 °C) was on in 18 (25%).** 21 came on later (median 41 min late). **34 (47%) never fired.**
+- Watch was the only alert in 29 trials (40%). Neither fired in 5 (7%).
+
+**Implication**: Watch is the safety threshold. A single 38.5 °C alarm would have stayed silent in nearly half of these trials.
+
+---
+
+## Fairness: men vs women
+
+| | People | Bias | RMSE |
 |---|---|---|---|
 | Women | 15 | −0.09 °C | 0.42 °C |
 | Men | 20 | −0.18 °C | 0.40 °C |
 
-**Difference (men − women)**: −0.10 °C  
-**95% CI**: [−0.26, +0.09]  
-**Result**: **Not statistically significant**
+**Difference (men − women)**: −0.10 °C, 95% CI [−0.26, +0.09]. No clear difference, but the interval cannot rule out a small one.
 
-### Context
-Published validations of this algorithm are **overwhelmingly male**. One 251-subject study had 36 women and ran **no sex analysis**. 
-
-**We ran it whatever the answer, and we report it.**
+Published validations of this algorithm are mostly male; one 251-subject study had 36 women and no sex analysis. We found no published sex-stratified analysis to compare against.
 
 ---
 
-## Data
+## Limits
 
-- **PROSPIE V3** (Loughborough, CC BY-NC 4.0)
-- **37 participants** (15 women, 20 men), 9 heat conditions
-- **14,041 minutes** scored with rectal reference
-- **Chest heart rate only** (Equivital ECG + Polar)
-- **Leave-one-subject-out** cross-validation
-
----
-
-## Key Takeaways for Ember
-
-1. **Always show the ±** — it's calibrated and honest
-2. **Never hide the number at ≥38.0°C** — refusal logic must respect this
-3. **Watch (38.0°C) is the primary safety threshold** — it fires early
-4. **Act Now (38.5°C) fires late or not at all** — it's a backup, not the main alert
-5. **No sex bias detected** — and we were the first to look
-6. **The estimate lags true core by minutes** — state this as a limitation
+- Calibrated on chest ECG heart rate. It carries over to any sensor that reads heart rate correctly; the demo uses low-cost pulse sensors, a product would use validated ones.
+- When heart rate was missing in most minutes, the range held only about 75%.
+- Coverage drops to 67% at true core ≥ 38.5 °C; Act now never fired in 47% of trials that got there.
+- Not a medical device.
 
 ---
 
-## What Makes This a Contribution
+## What makes this a contribution
 
-1. **Honest accuracy**: LOSO validation on open data (most work doesn't)
-2. **Calibrated uncertainty**: conformal intervals hold their promise (Kalman doesn't)
-3. **Fairness audit**: first sex-stratified analysis of this algorithm
-4. **Refusal mode**: the device says "I don't know" when signals disagree
-
-**This is not just a reimplementation. It's an honest, auditable, fair version of a widely-deployed algorithm.**
+1. **Honest accuracy**: leave-one-subject-out on open data.
+2. **Uncertainty that keeps its promise**: 90% means 90% overall, and we show where it falls short.
+3. **Lag measured, not hidden**: the two-tier alert design follows from it.
+4. **Sex-stratified check**: one we could not find published for this algorithm.
+5. **Refusal mode**: the device says "can't estimate" when its signals disagree, except at 38.0 °C and up, where it always shows the number.
 
 ---
 
-**Figures**: `figures/judges_coverage.png`, `judges_trial_interval.png`, `judges_lag.png`  
-**Full results**: `analysis/JUDGES_SUMMARY.md`  
-**Data**: `analysis/judges_results.json`
+**Figures**: `figures/judges_coverage.png`, `figures/judges_trial_interval.png`, `figures/judges_lag.png`
+**Full results**: `analysis/JUDGES_SUMMARY.md`, `analysis/judges_results.txt`, `analysis/judges_results.json`

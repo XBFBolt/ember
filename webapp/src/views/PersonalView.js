@@ -12,7 +12,7 @@ import {
 } from '../lib/datastore.js';
 import {
   trendRate, formatTrend, forecastRange, formatRange, recommendedAction,
-  CONF_EDGES, CONF_HALF, CONF_SYNTHETIC,
+  CONF_EDGES, CONF_HALF, CONF_SYNTHETIC, CONF_MEASURED_COV,
 } from '../lib/estimator.js';
 import { toast } from '../lib/toast.js';
 
@@ -431,7 +431,7 @@ function _template() {
     </section>
 
     <footer class="personal__foot">
-      <span>Heart rate and history stay on your device. Not a medical device.</span>
+      <span>This is an estimate, not a medical reading. Heart rate and history stay on your device.</span>
       <a href="#how-sure" data-action="how-sure">How sure is Ember?</a>
     </footer>
   </div>
@@ -442,8 +442,10 @@ function _template() {
       <button type="button" class="btn btn--secondary btn-sm" data-action="close-dialog">Close</button>
     </div>
     <p>The ± is a 90% range: it is sized so your real core temperature should fall inside it about 9 times out of 10. It comes from comparing Ember's estimate with a core thermometer in 37 people, not from the filter's own guess, so it is honest about how wrong Ember can be.</p>
-    <p>The range is wider when you are hotter, where the estimate is less certain. When the sensors disagree, Ember shows no number at all.</p>
-    <p><strong>Measured coverage</strong>: Under leave-one-subject-out validation on PROSPIE V3 data (37 participants, chest heart-rate sensors, 14,041 minutes), Ember's 90% interval covered <strong>90%</strong> of true core temperatures. The Kalman filter's uncalibrated "90%" interval covered only <strong>34%</strong>.</p>
+    <p><strong>Measured coverage</strong>: tested on 37 people it had never seen (PROSPIE V3, chest heart-rate straps, 14,041 minutes), the true value was inside Ember's range <strong>${(CONF_MEASURED_COV * 100).toFixed(1)}%</strong> of the time. The filter's own "90%" range held only <strong>34%</strong> of the time.</p>
+    <p>It holds less well when you are very hot. When true core was ${fmtC(THRESHOLDS.ACT_NOW_C)} or more, the range held about 2 times in 3, because the estimate lags behind a fast rise. That is why Watch starts at ${fmtC(THRESHOLDS.WATCH_C)}.</p>
+    <p>When the sensors disagree, Ember pauses the number. From ${fmtC(THRESHOLDS.WATCH_C)} up it always shows the number, marked Low confidence.</p>
+    <p>The ± depends on the estimate, from ± ${Math.min(...CONF_HALF).toFixed(1)}° to ± ${Math.max(...CONF_HALF).toFixed(1)}°:</p>
     <table class="sheet__table">
       <thead><tr><th>Estimate</th><th>Range</th></tr></thead>
       <tbody>${_confRows()}</tbody>

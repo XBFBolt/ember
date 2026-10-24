@@ -23,29 +23,29 @@
       "nominal": 0.5,
       "kalman_coverage": 0.14151413716971725,
       "kalman_width": 0.13749393648442446,
-      "conformal_coverage": 0.4985399900292002,
-      "conformal_width": 0.49564094438102735
+      "conformal_coverage": 0.4991809700163806,
+      "conformal_width": 0.4966130487315095
     },
     {
       "nominal": 0.8,
       "kalman_coverage": 0.2631578947368421,
       "kalman_width": 0.2612427683345508,
       "conformal_coverage": 0.795954704080906,
-      "conformal_width": 0.9844706290428601
+      "conformal_width": 0.9865473758539115
     },
     {
       "nominal": 0.9,
       "kalman_coverage": 0.3432803931343921,
       "kalman_width": 0.33530146313490217,
-      "conformal_coverage": 0.8950929420981412,
-      "conformal_width": 1.3463831299358702
+      "conformal_coverage": 0.8967310020653799,
+      "conformal_width": 1.336200126386686
     },
     {
       "nominal": 0.95,
       "kalman_coverage": 0.40460081190798375,
       "kalman_width": 0.39953633620639595,
-      "conformal_coverage": 0.9453742610925148,
-      "conformal_width": 1.6763569050067466
+      "conformal_coverage": 0.9445196211096076,
+      "conformal_width": 1.682633372087464
     }
   ]
 }
