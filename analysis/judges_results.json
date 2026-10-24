@@ -1,0 +1,103 @@
+{
+  "coverage_comparison": {
+    "kalman_coverage": 0.3432803931343921,
+    "kalman_width": 0.33530146313490133,
+    "conformal_coverage": 0.8950929420981412,
+    "conformal_width": 1.3463831299358702
+  },
+  "coverage_by_band": [
+    {
+      "band": "normal (<37.5)",
+      "lo": 0,
+      "hi": 37.5,
+      "n": 3949,
+      "kalman_coverage": 0.35679918966827046,
+      "conformal_coverage": 0.9799949354266903
+    },
+    {
+      "band": "warm (37.5-38.0)",
+      "lo": 37.5,
+      "hi": 38.0,
+      "n": 4435,
+      "kalman_coverage": 0.4036076662908681,
+      "conformal_coverage": 0.9535512965050733
+    },
+    {
+      "band": "watch (38.0-38.5)",
+      "lo": 38.0,
+      "hi": 38.5,
+      "n": 3783,
+      "kalman_coverage": 0.30874966957441186,
+      "conformal_coverage": 0.8503832936822627
+    },
+    {
+      "band": "act now (\u226538.5)",
+      "lo": 38.5,
+      "hi": 99,
+      "n": 1874,
+      "kalman_coverage": 0.2417289220917823,
+      "conformal_coverage": 0.6680896478121665
+    }
+  ],
+  "lag_analysis": {
+    "total_trials": 73,
+    "watch_lags": {
+      "n": 68,
+      "median": 0.0,
+      "mean": 6.617647058823529,
+      "std": 14.880928785613193,
+      "min": 0.0,
+      "max": 65.0,
+      "never_fired": 5
+    },
+    "act_lags": {
+      "n": 39,
+      "median": 1.0,
+      "mean": 16.384615384615383,
+      "std": 22.309725813593317,
+      "min": 0.0,
+      "max": 63.0,
+      "never_fired": 34
+    },
+    "watch_fired_first": 21,
+    "watch_fired_first_pct": 53.84615384615385
+  },
+  "sex_bias": {
+    "bias": {
+      "groups": [
+        "F",
+        "M"
+      ],
+      "point": -0.09535416373841239,
+      "ci": [
+        -0.2615396812225108,
+        0.09285691353292612
+      ],
+      "p_exceeds_zero": 0.1522
+    },
+    "rmse": {
+      "groups": [
+        "F",
+        "M"
+      ],
+      "point": -0.018244394367372407,
+      "ci": [
+        -0.1258399104851296,
+        0.08593472820985544
+      ],
+      "p_exceeds_zero": 0.3674
+    }
+  },
+  "rising_vs_steady": {
+    "rising": {
+      "n": 1253,
+      "kalman_coverage": 0.3048683160415004,
+      "conformal_coverage": 0.8563447725458898
+    },
+    "steady": {
+      "n": 6416,
+      "kalman_coverage": 0.3274625935162095,
+      "conformal_coverage": 0.9039900249376559
+    }
+  }
+}

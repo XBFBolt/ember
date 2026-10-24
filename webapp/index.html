@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ember</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="src/styles/main.css">
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar__inner">
+      <div class="topbar__left">
+        <div class="brand">Ember</div>
+        <div class="conn">
+          <button type="button" id="conn-chip" class="conn__chip" aria-haspopup="true" aria-expanded="false" aria-controls="conn-menu">
+            <span id="conn-dot" class="connection-dot"></span><span id="conn-label">Not connected</span>
+          </button>
+          <div id="conn-menu" class="conn__menu" hidden>
+            <p id="conn-desc" class="conn__desc"></p>
+            <button type="button" id="conn-btn" class="btn btn--primary btn-sm">Connect device</button>
+          </div>
+        </div>
+      </div>
+      <nav class="tabs" aria-label="Views">
+        <a href="?view=personal" data-view-link="personal">Personal</a>
+        <a href="?view=coach" data-view-link="coach">Coach</a>
+        <a href="?view=supervisor" data-view-link="supervisor">Supervisor</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- view container — views are mounted here by JS -->
+  <div id="view-container"></div>
+
+<script type="module">
+  import { mount as mountPersonal }   from './src/views/PersonalView.js';
+  import { mount as mountCoach }      from './src/views/CoachView.js';
+  import { mount as mountSupervisor } from './src/views/SupervisorView.js';
+  import { subscribe }                from './src/lib/datastore.js';
+  import { connectSerial, disconnectSerial, startSimulation } from './src/lib/serial.js';
+  import { startWeatherWithGeolocation }    from './src/lib/weather.js';
+
+  // ── view router ─────────────────────────────────────────────────────
+  const VIEWS = {
+    personal:   mountPersonal,
+    coach:      mountCoach,
+    supervisor: mountSupervisor,
+  };
+
+  let _unmountFn = null;
+  const container = document.getElementById('view-container');
+
+  function switchView(name) {
+    document.querySelectorAll('[data-view-link]').forEach(a => {
+      if (a.dataset.viewLink === name) {
+        a.setAttribute('aria-current', 'page');
+      } else {
+        a.removeAttribute('aria-current');
+      }
+    });
+    if (_unmountFn) { _unmountFn(); _unmountFn = null; }
+    const mountFn = VIEWS[name];
+    if (mountFn) _unmountFn = mountFn(container);
+  }
+
+  // The view lives in the URL (?view=coach), so a reload keeps it and the
+  // projector and the phone can open different views.
+  document.querySelectorAll('[data-view-link]').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      const name = a.dataset.viewLink;
+      const url = new URL(location.href);
+      url.searchParams.set('view', name);
+      history.replaceState(null, '', url);
+      switchView(name);
+    });
+  });
+
+  function viewFromUrl() {
+    const v = new URLSearchParams(location.search).get('view');
+    return v in VIEWS ? v : 'personal';
+  }
+
+  // ── connection chip ──────────────────────────────────────────────
+  const connDot   = document.getElementById('conn-dot');
+  const connLabel = document.getElementById('conn-label');
+  const connChip  = document.getElementById('conn-chip');
+  const connMenu  = document.getElementById('conn-menu');
+  const connDesc  = document.getElementById('conn-desc');
+  const connBtn   = document.getElementById('conn-btn');
+  let connState = 'none';   // 'demo' | 'device' | 'none'
+
+  subscribe(({ connected, simulating }) => {
+    connState = simulating ? 'demo' : connected ? 'device' : 'none';
+    connDot.className = 'connection-dot' + (connState === 'demo' ? ' simulating' : connState === 'device' ? ' connected' : '');
+    connLabel.textContent = { demo: 'Demo', device: 'Connected', none: 'Not connected' }[connState];
+    connDesc.textContent  = {
+      demo:   'Showing a simulated session.',
+      device: 'Ember device connected over USB.',
+      none:   'No device connected.',
+    }[connState];
+    connBtn.textContent = connState === 'device' ? 'Disconnect' : 'Connect device';
+  });
+
+  function setMenu(open) {
+    connMenu.hidden = !open;
+    connChip.setAttribute('aria-expanded', String(open));
+  }
+  connChip.addEventListener('click', e => { e.stopPropagation(); setMenu(connMenu.hidden); });
+  document.addEventListener('click', e => { if (!connMenu.contains(e.target)) setMenu(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') setMenu(false); });
+
+  connBtn.addEventListener('click', () => {
+    setMenu(false);
+    if (connState === 'device') disconnectSerial(); else connectSerial();
+  });
+
+  // ── boot ─────────────────────────────────────────────────────────────
+  startWeatherWithGeolocation();
+  startSimulation();
+  switchView(viewFromUrl());
+</script>
+
+</body>
+</html>

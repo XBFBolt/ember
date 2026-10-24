@@ -1,0 +1,51 @@
+{
+  "overall": {
+    "n": 14041,
+    "rmse": 0.4047600727310723,
+    "mae": 0.3122077656800161,
+    "bias": -0.1440124450077487,
+    "sd": 0.3782873561675474,
+    "r2": 0.47279481066994367,
+    "loa_lo": -0.8854556630961415,
+    "loa_hi": 0.5974307730806442
+  },
+  "detection": {
+    "sensitivity": 0.6057981262153085,
+    "specificity": 0.8947996183206107,
+    "prevalence": 0.40289153194216937,
+    "tp": 3427,
+    "fn": 2230,
+    "tn": 7502,
+    "fp": 882
+  },
+  "coverage": [
+    {
+      "nominal": 0.5,
+      "kalman_coverage": 0.14151413716971725,
+      "kalman_width": 0.13749393648442446,
+      "conformal_coverage": 0.4985399900292002,
+      "conformal_width": 0.49564094438102735
+    },
+    {
+      "nominal": 0.8,
+      "kalman_coverage": 0.2631578947368421,
+      "kalman_width": 0.2612427683345508,
+      "conformal_coverage": 0.795954704080906,
+      "conformal_width": 0.9844706290428601
+    },
+    {
+      "nominal": 0.9,
+      "kalman_coverage": 0.3432803931343921,
+      "kalman_width": 0.33530146313490217,
+      "conformal_coverage": 0.8950929420981412,
+      "conformal_width": 1.3463831299358702
+    },
+    {
+      "nominal": 0.95,
+      "kalman_coverage": 0.40460081190798375,
+      "kalman_width": 0.39953633620639595,
+      "conformal_coverage": 0.9453742610925148,
+      "conformal_width": 1.6763569050067466
+    }
+  ]
+}

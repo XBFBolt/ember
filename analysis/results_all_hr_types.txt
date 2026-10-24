@@ -1,0 +1,110 @@
+Ember evaluation
+====================================================================
+
+ECTemp coefficient self-check:
+  [ok ] CT 36.5 -> HR   54.3 (expect 40-75)
+  [ok ] CT 37.0 -> HR   78.5 (expect 65-95)
+  [ok ] CT 38.0 -> HR  120.1 (expect 105-135)
+  [ok ] CT 39.0 -> HR  152.5 (expect 135-170)
+  [ok ] CT 40.0 -> HR  175.8 (expect 155-195)
+  [ok ] model peaks at CT 42.05 (must be > 41.0)
+  [ok ] inverse round trip -> 38.000000
+  PASS
+
+loaded Prospie dataset_open access V3.xlsx
+  17264 rows x 58 columns
+  columns: ['Condition', 'Time', 'Activity code', 'Participant', 'Sex', 'Age', 'Bodymasskg', 'Heightcm', 'Bodyfat%', 'VO2peakmlkgmin', 'Acclimationstatus', 'Trainingstatus', 'Clothing', 'Environmental temperature (chamber or cooling area outside chamber) Humidity', 'Environmental temperature (chamber or cooling area outside chamber) Temp', 'Environmental temperature (chamber or cooling area outside chamber) Wind', 'Environmental (Inside clothing) Tfront', 'Environmental (Inside clothing) Rhfront', 'Environmental (Inside clothing) Tback', 'Environmental (Inside clothing) Rhback', 'Activity workrest', 'OxygenConsumption ml.kg.min', 'Treadmillsettings Speedkm.hr-1', 'Treadmillsettings Gradient%', 'Solar present'] ...
+
+  column mapping chosen:
+    subject    <- 'Participant'
+    sex        <- 'Sex'
+    condition  <- 'Condition'
+    minute     <- 'Time'
+    hr         <- 'InsulatedskinTemp HR'
+    hr_type    <- 'InsulatedskinTemp HRtype'
+    core_c     <- 'Corerectal'
+
+  WARNING: inconsistent sex code for participant(s) ['17', '18']; sex set to missing (left out of the by-sex analysis)
+
+  17264 minutes kept, 17196 with core temp (scored), 11953 with HR
+  40 subjects, 155 trials, 9 conditions; every trial is 1-minute spaced
+  sex: {'F': 17, 'M': 21}
+  trials by HR sensor: finger PPG 28, Equivital chest ECG 103, Polar chest strap 24
+  core temp range 35.96 - 39.53 C
+
+====================================================================
+ 1. HONEST ACCURACY  (leave-one-subject-out)
+====================================================================
+  n = 17196 samples, 40 subjects
+  RMSE   0.431 C
+  MAE    0.337 C
+  bias   -0.191 C
+  95% limits of agreement  -0.95 to +0.57 C
+  R^2    0.4013
+
+  For reference, published figures for this algorithm:
+    original paper (Buller 2013)           RMSE 0.30, R^2 0.71
+    USARIEM product page                   RMSE 0.30, LoA +/-0.63
+    independent standardized benchmark     RMSE 0.41 (D1), 0.66 (D2)
+                                           R^2  0.47 (D1), -0.40 (D2)
+
+  Detecting core temp >= 38.0 C (prevalence 42%)
+    sensitivity 0.549   specificity 0.910
+    missed 3255 of 7212 elevated samples
+  Benchmark reference: sensitivity 0.71 (D1), 0.33 (D2)
+
+====================================================================
+ 2. IS THE UNCERTAINTY HONEST?
+====================================================================
+   nominal |   Kalman   width | conformal   width
+  --------------------------------------------------
+      0.50 |    0.135   0.143 |     0.500   0.543
+      0.80 |    0.254   0.272 |     0.794   1.106
+      0.90 |    0.328   0.349 |     0.894   1.435
+      0.95 |    0.386   0.416 |     0.945   1.710
+
+  A 90% interval that covers far less than 90% of the time is
+  worse than no interval, because a user acts on it.
+
+====================================================================
+ 3. DOES IT WORK EQUALLY WELL FOR EVERYONE?
+====================================================================
+  F  n_subj=17  RMSE 0.453  bias -0.172  R^2 +0.257  90% coverage 0.867
+  M  n_subj=21  RMSE 0.418  bias -0.211  R^2 +0.476  90% coverage 0.907
+
+  BIAS difference (M minus F): -0.039 C <- primary
+    bootstrap 95% CI over subjects [-0.206, +0.146]  includes zero
+
+  RMSE difference (M minus F): -0.035 C
+    bootstrap 95% CI over subjects [-0.146, +0.079]  includes zero
+
+  Note on metric choice: a systematic offset between groups
+  shows up in BIAS and barely moves RMSE. Audit on bias, or
+  you will declare a biased model fair.
+
+  Context: published validations of this algorithm are
+  overwhelmingly male. One 251-subject study had 36 women and
+  ran no sex analysis; several others had none at all.
+
+  By heart-rate sensor (trial's main sensor):
+    finger PPG           n_subj=15  n= 3271  RMSE 0.539  bias -0.407  90% coverage 0.806
+    Equivital chest ECG  n_subj=23  n=11084  RMSE 0.368  bias -0.090  90% coverage 0.932
+    Polar chest strap    n_subj=14  n= 2841  RMSE 0.510  bias -0.335  90% coverage 0.849
+
+====================================================================
+ 4. WHEN SHOULD THE DEVICE REFUSE TO ANSWER?
+====================================================================
+   answered    RMSE     MAE   width threshold
+       100%   0.431   0.337   <= 0.825 C
+        82%   0.452   0.356   <= 0.796 C
+        63%   0.448   0.354   <= 0.771 C
+        45%   0.433   0.343   <= 0.704 C
+        26%   0.472   0.374   <= 0.646 C
+
+  Pick the operating point deliberately and defend it. A device
+  that answers 70% of the time and is right when it does beats one
+  that always answers and is sometimes badly wrong.
+
+wrote ember_results.png
+wrote ember_by_sex.png
+wrote ember_predictions.csv and ember_summary.json
