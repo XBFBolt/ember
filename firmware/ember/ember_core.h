@@ -9,12 +9,14 @@
  *
  * Contents
  *   1. ECTemp           the published core-temperature Kalman filter
- *   2. Thermistor       NTC resistance -> temperature, with calibration
- *   3. Psychrometrics   evaporative headroom
- *   4. Periodicity      autocorrelation heart rate / cadence estimator
- *   5. Fusion           two pulse sensors -> one heart rate, or none
- *   6. Confounds        flags and the OK / CAUTION / REFUSE decision
- *   7. Packet           the 20-byte BLE frame the app decodes
+ *   2. Thermistor       NTC resistance -> temperature, calibration, skin and air
+ *   3. Periodicity      autocorrelation heart rate / cadence estimator
+ *   4. Heart rate       one pulse sensor -> a heart rate, or none
+ *   5. Confounds        flags and the OK / CAUTION / REFUSE decision
+ *   6. Packet           the 20-byte BLE frame the app decodes
+ *
+ * Hardware v5 (firmware 2.2): one pulse sensor, two skin thermistors, one
+ * air thermistor outside the strap, IMU. No SHT40, so no humidity.
  */
 
 #ifndef EMBER_CORE_H
@@ -113,8 +115,9 @@ inline bool coefficientsSane() {
 // The +/-5 % on R25 is the problem worth solving: out of the box two
 // thermistors can disagree by over 2 C. A resistance error is a constant
 // error in 1/T, which over the 20-40 C range is almost exactly a constant
-// temperature offset - so one calibration point against the SHT40 fixes
-// it. calScale is that correction, stored on the board.
+// temperature offset - so one calibration point fixes it. calScale is that
+// correction, stored on the board. With no reference sensor on the v5
+// hardware, CAL makes the beads agree with each other (ntcCalibrate).
 
 struct NtcParams {
   float r25    = 10000.0f;
@@ -133,6 +136,25 @@ inline float ntcResistance(float vNodeMv, const NtcParams &p) {
   return p.rFixed * vNodeMv / (p.vExcMv - vNodeMv);
 }
 
+/*
+ * A divider built upside down: 3V3 -> thermistor -> node -> fixed resistor
+ * -> GND. Heat then RAISES the node voltage, and the maths above reads it as
+ * cold. This returns the voltage the standard divider would show for the same
+ * thermistor resistance (Vexc - V, exact), so everything downstream - ntcTempC,
+ * CAL, the open/short checks - works unchanged.
+ *
+ * Open and short keep their meaning. An open thermistor on top leaves the node
+ * at 0 V, which mirrors to the open end. A shorted one pulls the node to 3V3,
+ * but the ADC stops near 3.1 V, so at or above NTC_OPEN_MV (about 85 C on a
+ * standard divider) it is reported as shorted rather than mirrored to ~200 mV
+ * and read as a hot bead.
+ */
+inline float ntcNodeMv(float measuredMv, bool thermistorOnTop, const NtcParams &p) {
+  if (!thermistorOnTop || isnan(measuredMv)) return measuredMv;
+  if (measuredMv >= NTC_OPEN_MV) return 0.0f;
+  return p.vExcMv - measuredMv;
+}
+
 inline float ntcTempFromR(float r, const NtcParams &p) {
   if (isnan(r) || r <= 0.0f) return NAN;
   float invT = 1.0f / 298.15f + logf(r / p.r25) / p.beta;
@@ -148,6 +170,71 @@ inline float ntcTempC(float vNodeMv, float calScale, const NtcParams &p) {
   float r = ntcResistance(vNodeMv, p);
   if (isnan(r)) return NAN;
   return ntcTempFromR(r / calScale, p);
+}
+
+/*
+ * CAL with no reference sensor.
+ *
+ * v2.1 calibrated the skin beads against the SHT40. The v5 hardware has no
+ * SHT40, so CAL puts every bead at one temperature (device unpowered at room
+ * temperature, the air bead lying beside it) and makes them agree. Each
+ * bead's error is a resistance scale, so the shared reference is the
+ * geometric mean of their resistances. That removes the bead-to-bead spread
+ * and averages the tolerances: three +/-5 % beads leave about +/-0.6 C of
+ * absolute error, against +/-1.1 C for one bead out of the box.
+ *
+ * keep[i]: bead i already has a trusted scale in k[i] (the skin beads of a
+ * board calibrated against the SHT40 under v2.1). Kept beads are not
+ * changed and set the reference on their own; the others are calibrated
+ * against them.
+ *
+ * mv: each bead's averaged node voltage. k: in/out scales, written only on
+ * CAL_OK. refC: out, the reference temperature.
+ */
+enum CalStatus : uint8_t { CAL_OK = 0, CAL_OPEN_OR_SHORT, CAL_BEADS_APART, CAL_NOT_ROOM };
+
+static const int   NTC_BEADS = 3;              // skin A, skin B, air C
+static const float CAL_DRIFT_C = 0.3f;         // max change of one bead over the 30 s CAL
+// Two +/-5 % beads at one temperature read at most ~2.2 C apart. Further
+// apart, they are not at the same temperature (one in a hand, on skin) or a
+// divider is miswired.
+static const float CAL_MAX_APART_C = 2.5f;
+// The reference must look like a room. Outside this, the beads are not at
+// room temperature or every fixed resistor is wrong - which agreement alone
+// cannot catch (a 4.7k in place of each 10k reads about 8 C).
+static const float CAL_ROOM_LO = 12.0f, CAL_ROOM_HI = 35.0f;
+
+inline CalStatus ntcCalibrate(const float mv[], int n, const bool keep[], float k[],
+                              const NtcParams &p, float *refC) {
+  float r[NTC_BEADS], t[NTC_BEADS];
+  if (n < 1 || n > NTC_BEADS) return CAL_OPEN_OR_SHORT;
+  float tLo = 1e9f, tHi = -1e9f;
+  int nKeep = 0;
+  for (int i = 0; i < n; i++) {
+    r[i] = ntcResistance(mv[i], p);
+    if (isnan(r[i])) return CAL_OPEN_OR_SHORT;
+    t[i] = ntcTempFromR(r[i] / (keep[i] ? k[i] : 1.0f), p);
+    tLo = fminf(tLo, t[i]); tHi = fmaxf(tHi, t[i]);
+    if (keep[i]) nKeep++;
+  }
+  if (tHi - tLo > CAL_MAX_APART_C) return CAL_BEADS_APART;
+
+  float rRef, ref;
+  if (nKeep > 0) {
+    double s = 0;
+    for (int i = 0; i < n; i++) if (keep[i]) s += t[i];
+    ref = (float)(s / nKeep);
+    rRef = ntcRFromTemp(ref, p);
+  } else {
+    double s = 0;
+    for (int i = 0; i < n; i++) s += log(r[i]);
+    rRef = (float)exp(s / n);
+    ref = ntcTempFromR(rRef, p);
+  }
+  *refC = ref;
+  if (ref < CAL_ROOM_LO || ref > CAL_ROOM_HI) return CAL_NOT_ROOM;
+  for (int i = 0; i < n; i++) if (!keep[i]) k[i] = r[i] / rRef;
+  return CAL_OK;
 }
 
 // Two beads, one skin temperature - or an honest statement that there
@@ -175,30 +262,19 @@ inline SkinResult fuseSkin(float a, float b) {
   return { NAN, SKIN_NONE };
 }
 
+// The air bead (C) hangs outside the strap, in the air near the body. It is
+// shown to the wearer and feeds no decision. Outside this range it is
+// unplugged or broken (the open-circuit cut-off is near -13 C).
+static const float AIR_LO = -10.0f, AIR_HI = 55.0f;
+
+inline float airTemp(float tC) {
+  return (!isnan(tC) && tC >= AIR_LO && tC <= AIR_HI) ? tC : NAN;
+}
+
 // =================================================================== 3
-// Psychrometrics.
-
-inline float satVapourKpa(float tC) {                // Magnus formula
-  if (isnan(tC)) return NAN;
-  return 0.6112f * expf(17.62f * tC / (243.12f + tC));
-}
-
-/*
- * EVAPORATIVE HEADROOM, kPa: saturated vapour pressure at the skin minus
- * the actual vapour pressure of the microclimate air touching it. This is
- * the driving force for sweat evaporation. Near zero, sweat forms and does
- * not evaporate, and the body has lost its main cooling route.
- */
-inline float evaporativeHeadroom(float skinC, float microC, float microRh) {
-  if (isnan(skinC) || isnan(microC) || isnan(microRh)) return NAN;
-  float rh = fminf(fmaxf(microRh, 0.0f), 100.0f) / 100.0f;
-  return satVapourKpa(skinC) - rh * satVapourKpa(microC);
-}
-
-// =================================================================== 4
 // Periodicity by normalised autocorrelation.
 //
-// Used twice: heart rate from each pulse sensor, and step cadence from the
+// Used twice: heart rate from the pulse sensor, and step cadence from the
 // accelerometer. Autocorrelation rather than beat-by-beat peak picking for
 // two reasons:
 //   - it is robust to waveform shape and polarity, which vary between
@@ -308,24 +384,23 @@ inline Periodicity periodicity(const float *x, int n, float fs, float fMin, floa
   return out;
 }
 
-// =================================================================== 5
-// Heart-rate fusion: two independent pulse sensors.
+// =================================================================== 4
+// Heart rate: one pulse sensor.
 //
-// The design principle of the whole device is that every measurement it
-// relies on is made twice and checked for agreement. Two optical sensors
-// in different places on the chest see different motion artifact but the
-// same heart. When they agree, that is evidence the number is a pulse.
-// When they disagree, neither is believed and the Kalman filter coasts.
+// v2.1 had two pulse sensors and believed a heart rate only when they
+// agreed. The v5 hardware has one, so nothing cross-checks it: a heart rate
+// is believed on its own signal quality (the autocorrelation peak, at least
+// PPG_SQI_MIN) and on the cadence check below. When either fails, there is
+// no heart rate that second, and a minute short of good seconds makes the
+// Kalman filter coast.
 
 static const float PPG_SQI_MIN   = 0.50f;
 static const float HR_MIN = 40.0f, HR_MAX = 200.0f;
-static const float HR_AGREE_BPM  = 5.0f;    // or 6 %, whichever is larger
-static const float HR_AGREE_FRAC = 0.06f;
 static const float CADENCE_LOCK_BPM = 5.0f;
-// A channel sitting on the step cadence is believed only if it is within
-// this of the last minute's fused heart rate. In steady running the heart
-// drifts a few bpm a minute; an optical sensor that locks onto the bounce
-// jumps by tens of bpm from one second to the next.
+// A pulse sitting on the step cadence is believed only if it is within
+// this of the last minute's heart rate. In steady running the heart drifts
+// a few bpm a minute; an optical sensor that locks onto the bounce jumps by
+// tens of bpm from one second to the next.
 static const float CADENCE_JUMP_BPM = 15.0f;
 
 // A minute needs this many good seconds to update the filter (otherwise it
@@ -338,21 +413,23 @@ static const int MIN_GOOD_SEC_PER_MINUTE = 30;
 static const int HR_REF_KEEP_MIN = 3;
 
 /*
- * The heart rate the cadence check compares against: the mean fused heart
- * rate of the last GOOD minute, remembered through up to HR_REF_KEEP_MIN
- * lost minutes, then forgotten (NAN).
+ * The heart rate the cadence check compares against: the mean heart rate
+ * of the last GOOD minute, remembered through up to HR_REF_KEEP_MIN lost
+ * minutes, then forgotten (NAN).
  */
 struct HrReference {
   float hr = NAN;
   int lostMinutes = 0;
-  // Call once per minute: the minute's mean fused HR, or NAN if it was lost.
+  // Call once per minute: the minute's mean HR, or NAN if it was lost.
   void endMinute(float minuteMean) {
     if (!isnan(minuteMean)) { hr = minuteMean; lostMinutes = 0; return; }
     if (!isnan(hr) && ++lostMinutes > HR_REF_KEEP_MIN) hr = NAN;
   }
 };
 
-enum HrQuality : uint8_t { HRQ_NONE = 0, HRQ_SINGLE = 1, HRQ_AGREED = 2, HRQ_DISAGREE = 3 };
+// Frame byte 9. Values 2 (both sensors agree) and 3 (they disagree) were
+// v2.1's two-sensor states; 2.2 never sends them.
+enum HrQuality : uint8_t { HRQ_NONE = 0, HRQ_OK = 1 };
 
 struct Channel {
   float hr;          // NAN if not usable
@@ -360,13 +437,8 @@ struct Channel {
   bool  cadenceLocked;
 };
 
-inline bool hrAgree(float a, float b) {
-  float tol = fmaxf(HR_AGREE_BPM, HR_AGREE_FRAC * 0.5f * (a + b));
-  return fabsf(a - b) <= tol;
-}
-
-// One channel's own verdict: saturation, signal quality, plausible range.
-// The cadence check needs both channels, so it is a separate step.
+// The channel's own verdict: saturation, signal quality, plausible range.
+// The cadence check needs the motion sensor, so it is a separate step.
 inline Channel judgeChannel(const Periodicity &p, bool saturated) {
   Channel c = { NAN, p.sqi, false };
   if (saturated || isnan(p.freqHz) || p.sqi < PPG_SQI_MIN) return c;
@@ -377,89 +449,75 @@ inline Channel judgeChannel(const Periodicity &p, bool saturated) {
 }
 
 /*
- * Cadence check, on both channels together, BEFORE fusion.
+ * Cadence check.
  *
  * Motion artifact lands at step frequency, so a "pulse" at 60 x steps-per-
  * second may be the sensor bouncing. It may also be the heart: at 160-180
  * steps/min a runner's pulse genuinely sits there. Matching cadence alone
- * is therefore not enough to reject a channel. A channel at cadence is
- * rejected when
- *   - it jumped there: more than CADENCE_JUMP_BPM from the last minute's
- *     fused heart rate, or there is no last minute to compare against, or
- *   - the other channel has a heart rate that disagrees with it.
+ * is therefore not enough to reject it. A pulse at cadence is rejected when
+ * it jumped there: more than CADENCE_JUMP_BPM from the last minute's heart
+ * rate, or there is no last minute to compare against.
  *
- * It must run before fusion: both sensors bounce together, and two
- * artifacts agreeing with each other would otherwise pass the agreement
- * gate.
+ * With one sensor this is the only motion defence (v2.1 also rejected a
+ * channel that disagreed with the other one). A heart rate that climbs
+ * steadily onto the step rate and a bounce that does the same look alike,
+ * so pick demo work whose step rate is far from the heart rate.
  *
- * prevHr: HrReference::hr - the last good minute's fused heart rate, NAN
- * if there has been no good minute recently.
+ * prevHr: HrReference::hr - the last good minute's heart rate, NAN if
+ * there has been no good minute recently.
  */
-inline void cadenceCheck(Channel &a, Channel &b, float stepHz, bool moving, float prevHr) {
-  if (!moving || isnan(stepHz)) return;
-  const float cad = 60.0f * stepHz;
-  const float hrA = a.hr, hrB = b.hr;        // judge both on the values before the check
-  auto judge = [&](Channel &c, float own, float other) {
-    if (isnan(own) || fabsf(own - cad) > CADENCE_LOCK_BPM) return;   // not at cadence
-    bool jumped = isnan(prevHr) || fabsf(own - prevHr) > CADENCE_JUMP_BPM;
-    bool otherDisagrees = !isnan(other) && !hrAgree(own, other);
-    if (jumped || otherDisagrees) { c.hr = NAN; c.cadenceLocked = true; }
-  };
-  judge(a, hrA, hrB);
-  judge(b, hrB, hrA);
+inline void cadenceCheck(Channel &c, float stepHz, bool moving, float prevHr) {
+  if (!moving || isnan(stepHz) || isnan(c.hr)) return;
+  if (fabsf(c.hr - 60.0f * stepHz) > CADENCE_LOCK_BPM) return;     // not at cadence
+  bool jumped = isnan(prevHr) || fabsf(c.hr - prevHr) > CADENCE_JUMP_BPM;
+  if (jumped) { c.hr = NAN; c.cadenceLocked = true; }
 }
 
-struct Fused { float hr; HrQuality q; };
+struct HeartRate { float hr; HrQuality q; };
 
-inline Fused fuseHr(const Channel &a, const Channel &b) {
-  bool okA = !isnan(a.hr), okB = !isnan(b.hr);
-  if (okA && okB) {
-    if (hrAgree(a.hr, b.hr)) return { 0.5f * (a.hr + b.hr), HRQ_AGREED };
-    return { NAN, HRQ_DISAGREE };
-  }
-  if (okA) return { a.hr, HRQ_SINGLE };
-  if (okB) return { b.hr, HRQ_SINGLE };
-  return { NAN, HRQ_NONE };
+inline HeartRate heartRateOf(const Channel &c) {
+  if (isnan(c.hr)) return { NAN, HRQ_NONE };
+  return { c.hr, HRQ_OK };
 }
 
-// =================================================================== 6
+// =================================================================== 5
 // Confounds. The estimator cannot tell WHY a heart rate is high. These
 // ask whether the rest of the body agrees that heat is the explanation.
 
 enum State : uint8_t { STATE_OK = 0, STATE_CAUTION = 1, STATE_REFUSE = 2 };
 
+// Reserved bits are never set. 0x0002 and 0x0080 needed the SHT40's
+// humidity; they stay free for an air-temperature version once its
+// thresholds are tested. 0x0010, 0x0100 and 0x0200: do not reuse.
 enum Flag : uint16_t {
   F_MOTIONLESS_TACHY = 0x0001,  // high HR while still: caffeine, anxiety, illness
-  F_NO_THERMAL_LOAD  = 0x0002,  // ample evaporative headroom and skin not warm
+  F_RESERVED_0002    = 0x0002,  // was NO_THERMAL_LOAD (v2.1, needed humidity)
   F_COOL_SKIN        = 0x0004,
   F_STALE_HR         = 0x0008,  // no trustworthy heart rate for 2+ minutes
-  F_RESERVED_0010    = 0x0010,  // was WIDE_INTERVAL in v2.0. Never set. Do not reuse
+  F_RESERVED_0010    = 0x0010,  // was WIDE_INTERVAL in v2.0
   F_NO_BASELINE      = 0x0020,
-  F_CADENCE_LOCK     = 0x0040,  // a pulse channel was rejected as motion artifact
-  F_EVAP_FAILING     = 0x0080,  // NOT a doubt - a danger signal
-  F_PPG_DISAGREE     = 0x0100,  // the two pulse sensors disagree
-  F_PPG_SINGLE       = 0x0200,  // only one pulse sensor usable
-  F_SKIN_DISAGREE    = 0x0400,  // the two thermistors disagree           (info only)
-  F_SKIN_SINGLE      = 0x0800,  // one thermistor off skin                (info only)
-  F_NO_MICRO         = 0x1000,  // SHT40 missing                          (info only)
+  F_CADENCE_LOCK     = 0x0040,  // the pulse was rejected as motion artifact
+  F_RESERVED_0080    = 0x0080,  // was EVAP_FAILING (v2.1, needed humidity)
+  F_RESERVED_0100    = 0x0100,  // was PPG_DISAGREE (v2.1, two pulse sensors)
+  F_RESERVED_0200    = 0x0200,  // was PPG_SINGLE   (v2.1, two pulse sensors)
+  F_SKIN_DISAGREE    = 0x0400,  // the two skin thermistors disagree      (info only)
+  F_SKIN_SINGLE      = 0x0800,  // one skin thermistor off skin           (info only)
+  F_NO_AIR           = 0x1000,  // air thermistor not reading             (info only)
   F_LOW_BATT         = 0x2000,  //                                        (info only)
-  F_NOT_CALIBRATED   = 0x4000,  // thermistors never calibrated vs SHT40  (info only)
+  F_NOT_CALIBRATED   = 0x4000,  // skin thermistors never calibrated      (info only)
   F_BASELINE_RUNNING = 0x8000,
 };
 
 // Flags that, on their own, make the state CAUTION. They all cast doubt on
 // the heart rate the estimate is built from, or on its starting point.
 //
-// The info-only flags (skin, microclimate, calibration, battery) describe
-// the AUXILIARY sensors. Those feed the confound checks, not the estimate,
-// so they never lower confidence in the number by themselves - otherwise an
-// uncalibrated bead or a missing SHT40 would hold the display in Low
-// confidence for the whole session.
-static const uint16_t CAUTION_FLAGS = F_NO_BASELINE | F_BASELINE_RUNNING |
-                                      F_PPG_SINGLE | F_PPG_DISAGREE | F_CADENCE_LOCK;
+// The info-only flags (skin, air, calibration, battery) describe the
+// AUXILIARY sensors. Those feed the confound checks or the display, not the
+// estimate, so they never lower confidence in the number by themselves -
+// otherwise an uncalibrated bead would hold the display in Low confidence
+// for the whole session.
+static const uint16_t CAUTION_FLAGS = F_NO_BASELINE | F_BASELINE_RUNNING | F_CADENCE_LOCK;
 
-static const float HEADROOM_CRITICAL = 0.8f;   // kPa. Tune on your recordings
-static const float HEADROOM_AMPLE    = 2.5f;   // kPa.
 static const float ACT_STILL_G       = 0.035f; // below: essentially motionless
 static const float ACT_MOVING_G      = 0.05f;  // above: cadence check applies
 
@@ -475,14 +533,12 @@ static const int TACHY_GRACE_SEC = 600;
 
 struct Inputs {
   float ctEst;             // current core estimate (clamped), NAN if none
-  float hr;                // fused, NAN if none
-  HrQuality hrQ;
-  bool  cadenceLockSeen;   // any channel rejected for cadence this second
+  float hr;                // this second's heart rate, NAN if none
+  bool  cadenceLockSeen;   // the pulse was rejected for cadence this second
   int   coastMinutes;      // consecutive minutes without a filter update
   bool  everUpdated;
   float skinC;  SkinQuality skinQ;
-  float headroom;          // NAN if not computable
-  bool  haveMicro;
+  bool  haveAir;           // the air thermistor is reading
   bool  haveImu;           // motion sensor found at boot
   float activityG;         // smoothed (reads 0 with no motion sensor)
   int   secSinceMoving;    // seconds since activityG was last >= ACT_MOVING_G
@@ -499,11 +555,9 @@ inline uint16_t confoundFlags(const Inputs &in) {
   if (!in.baselineValid) f |= F_NO_BASELINE;
   if (in.baselineRunning) f |= F_BASELINE_RUNNING;
   if (in.cadenceLockSeen) f |= F_CADENCE_LOCK;
-  if (in.hrQ == HRQ_DISAGREE) f |= F_PPG_DISAGREE;
-  if (in.hrQ == HRQ_SINGLE)   f |= F_PPG_SINGLE;
   if (in.skinQ == SKIN_DISAGREE) f |= F_SKIN_DISAGREE;
   if (in.skinQ == SKIN_SINGLE)   f |= F_SKIN_SINGLE;
-  if (!in.haveMicro) f |= F_NO_MICRO;
+  if (!in.haveAir) f |= F_NO_AIR;
   if (!in.calibrated) f |= F_NOT_CALIBRATED;
   if (in.lowBatt) f |= F_LOW_BATT;
 
@@ -519,19 +573,10 @@ inline uint16_t confoundFlags(const Inputs &in) {
       !inGrace && !hot)
     f |= F_MOTIONLESS_TACHY;
 
-  // The skin doubts need calibrated beads. Out of the box a +/-5 % bead can
-  // read more than 1 C low, which in a cool, dry room raises both doubts and
-  // pauses a good estimate. Until CAL, skin raises no doubts. (EVAP_FAILING
-  // below stays on: a false "struggling to cool" is the safer mistake.)
-  if (in.calibrated) {
-    if (!isnan(in.headroom) && in.headroom > HEADROOM_AMPLE &&
-        !isnan(in.skinC) && in.skinC < 33.0f)
-      f |= F_NO_THERMAL_LOAD;
-
-    if (!isnan(in.skinC) && in.skinC < 31.0f) f |= F_COOL_SKIN;
-  }
-
-  if (!isnan(in.headroom) && in.headroom < HEADROOM_CRITICAL) f |= F_EVAP_FAILING;
+  // The skin doubt needs calibrated beads. Out of the box a +/-5 % bead can
+  // read more than 1 C low, which in a cool room raises the doubt against a
+  // good estimate. Until CAL, skin raises no doubt.
+  if (in.calibrated && !isnan(in.skinC) && in.skinC < 31.0f) f |= F_COOL_SKIN;
   return f;
 }
 
@@ -540,13 +585,15 @@ inline uint16_t confoundFlags(const Inputs &in) {
  * device refuses on a stale heart rate or two doubts. At or above Watch it
  * never refuses: the worst state is CAUTION, and the frame keeps the
  * number and the +/- (inflated while coasting, see coastInflation).
+ *
+ * There are two doubts (v2.1 had three, plus a humidity signal that
+ * cancelled one), so refusing on doubts takes both: a high heart rate
+ * while still AND cool skin.
  */
 inline State stateFromFlags(uint16_t f, float ctEst) {
   int doubts = 0;
   if (f & F_MOTIONLESS_TACHY) doubts++;
-  if (f & F_NO_THERMAL_LOAD)  doubts++;
   if (f & F_COOL_SKIN)        doubts++;
-  if (f & F_EVAP_FAILING)     doubts--;   // corroborates heat: cancels a doubt
 
   State s = STATE_OK;
   if ((f & F_STALE_HR) || doubts >= 2)          s = STATE_REFUSE;
@@ -575,16 +622,13 @@ inline bool baselineAllowed(float ctEst, bool everUpdated) {
 inline const char *flagReason(uint16_t f) {
   if (f & F_STALE_HR)         return "no trustworthy heart rate";
   if (f & F_MOTIONLESS_TACHY) return "high HR while still";
-  if (f & F_NO_THERMAL_LOAD)  return "no thermal load";
   if (f & F_COOL_SKIN)        return "skin not warm";
-  if (f & F_PPG_DISAGREE)     return "pulse sensors disagree";
   if (f & F_CADENCE_LOCK)     return "pulse matches step cadence";
-  if (f & F_PPG_SINGLE)       return "one pulse sensor only";
   if (f & F_BASELINE_RUNNING) return "baseline in progress";
   if (f & F_NO_BASELINE)      return "no baseline yet";
   if (f & F_SKIN_DISAGREE)    return "skin sensors disagree";
   if (f & F_NOT_CALIBRATED)   return "thermistors not calibrated";
-  if (f & F_NO_MICRO)         return "no microclimate sensor";
+  if (f & F_NO_AIR)           return "no air temperature sensor";
   return "";
 }
 
@@ -606,10 +650,14 @@ inline uint8_t lipoPercent(float v) {
   return 100;
 }
 
-// =================================================================== 7
+// =================================================================== 6
 // The BLE frame. 20 bytes, little-endian - fits the default BLE MTU, so
 // the app works without negotiating anything. Layout is documented in
 // docs/APP_INTERFACE.md and decoded by tools/ember_ble.py.
+//
+// The layout is v2.1's. Bytes 14, 15, 18 and 19 carried humidity,
+// evaporative headroom and the two per-sensor heart rates; they are
+// reserved now and always sent as their "not available" values.
 
 static const int PACKET_LEN = 20;
 
@@ -620,10 +668,9 @@ struct Frame {
   bool baselineRunning, logging;
   uint16_t flags;
   float hr; HrQuality hrQ;
-  float skinC, microC, microRh, headroomKpa;
+  float skinC, airC;
   uint8_t battPct;           // 255 = no battery (USB power)
   float activityG;
-  float hrA, hrB;
 };
 
 inline int16_t centi(float v) {
@@ -651,19 +698,13 @@ inline void encodeFrame(const Frame &f, uint8_t out[PACKET_LEN]) {
   out[8] = u8(f.hr, 1.0f, 0);
   out[9] = (uint8_t)f.hrQ;
   put16(out, 10, (uint16_t)centi(f.skinC));
-  put16(out, 12, (uint16_t)centi(f.microC));
-  out[14] = u8(f.microRh, 2.0f, 255);                     // 0.5 % units
-  if (isnan(f.headroomKpa)) out[15] = 0x80;               // -128 = none
-  else {
-    float h = roundf(f.headroomKpa * 20.0f);              // 0.05 kPa units
-    if (h > 127) h = 127;
-    if (h < -127) h = -127;
-    out[15] = (uint8_t)(int8_t)h;
-  }
+  put16(out, 12, (uint16_t)centi(f.airC));
+  out[14] = 255;                                          // reserved (was humidity)
+  out[15] = 0x80;                                         // reserved (was headroom), -128
   out[16] = f.battPct;
   out[17] = u8(f.activityG, 500.0f, 255);                 // 2 milli-g units
-  out[18] = u8(f.hrA, 1.0f, 0);
-  out[19] = u8(f.hrB, 1.0f, 0);
+  out[18] = 0;                                            // reserved (was HR sensor A)
+  out[19] = 0;                                            // reserved (was HR sensor B)
 }
 
 } // namespace ember

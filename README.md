@@ -20,12 +20,11 @@ close to meaningless. Ember is the version that tells the truth about that.
    claiming 90% in our testing.
 2. **It refuses.** When the signals disagree or the estimate falls outside
    the calibrated range, it shows `CANNOT ESTIMATE` and the reason.
-3. **Three sensors vote.** Heart rate alone cannot tell heat from caffeine.
-   Skin temperature, microclimate humidity and motion decide whether a high
-   heart rate has a thermal explanation — and together the first two give
-   **evaporative headroom**, the vapour-pressure gradient that drives sweat
-   evaporation. When it reaches zero, cooling has failed. That is the
-   mechanism of heat strain, measured directly, with $17 of sensors.
+3. **It checks the heart rate against the body.** Heart rate alone cannot
+   tell heat from caffeine. Skin temperature and motion decide whether a
+   high heart rate has a thermal explanation: a racing heart while sitting
+   still with cool skin is not heat, and the device says so instead of
+   showing a number. A third thermistor reads the air outside the strap.
 
 ---
 

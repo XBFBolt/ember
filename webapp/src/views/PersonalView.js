@@ -16,7 +16,7 @@ import {
 } from '../lib/estimator.js';
 import { toast } from '../lib/toast.js';
 import { sendCommand } from '../lib/device.js';
-import { FLAG, HRQ } from '../lib/frame.js';
+import { FLAG } from '../lib/frame.js';
 
 // ─── wearer + placeholder schedule ───────────────────────────────────────────
 // Placeholder until taken from a published heat-index table (see TODO Phase 2).
@@ -40,19 +40,10 @@ const CAUTION_TEXT = {
   // Only seen with a number at 38.0 °C and up: the device holds the estimate and widens the ±
   [FLAG.STALE_HR]:         'pulse signal lost: showing the last estimate, the range is widening',
   [FLAG.MOTIONLESS_TACHY]: 'heart rate is up while you are still',
-  [FLAG.NO_THERMAL_LOAD]:  'you don\'t look like you are heating up',
   [FLAG.COOL_SKIN]:        'your skin is cool',
-  [FLAG.PPG_DISAGREE]:     'the pulse sensors disagree',
-  [FLAG.CADENCE_LOCK]:     'a pulse sensor picked up your steps',
-  [FLAG.PPG_SINGLE]:       'one pulse sensor only',
+  [FLAG.CADENCE_LOCK]:     'the pulse sensor picked up your steps',
   [FLAG.BASELINE_RUNNING]: 'setting up',
   [FLAG.NO_BASELINE]:      'no baseline yet',
-};
-
-const HRQ_TEXT = {
-  [HRQ.AGREED]:   ' · 2 sensors agree',
-  [HRQ.SINGLE]:   ' · 1 sensor',
-  [HRQ.DISAGREE]: ' · sensors disagree',
 };
 
 // Hero when there is no number to show
@@ -165,7 +156,7 @@ function _setupState(data) {
 // ─── render ───────────────────────────────────────────────────────────────────
 function _render(root, data) {
   const { latest, history, session, onBreak, breakStartMs, breakTargetMin, now } = data;
-  const { status, ctEst, ctLo, ctHi, hr, skinC, flags, confidence } = latest;
+  const { status, ctEst, ctLo, ctHi, hr, skinC, confidence } = latest;
 
   const kind   = _heroKind(data);
   const setup  = _setupState(data);
@@ -180,6 +171,7 @@ function _render(root, data) {
   _set(root, 'name', WEARER_NAME);
   const device = data.source === 'ble' || data.source === 'serial';
   _set(root, 'mode', data.simulating ? 'Demo'
+    : data.source === 'replay' && data.link === 'connected' ? 'Replay'
     : device && data.link === 'connected' ? 'Live'
     : device && data.link === 'connecting' ? 'Connecting'
     : device && data.link === 'stalled' ? 'No data'
@@ -222,10 +214,6 @@ function _render(root, data) {
       ? (data.link === 'reconnecting' || stalled ? 'Your history is kept. The number comes back when EMB.R does.' : '')
       : noNum.note);
   }
-
-  // "Struggling to cool down" stands on its own, whatever the state
-  root.querySelector('[data-field="evap"]').hidden =
-    !(kind === 'number' || kind === 'paused') || !(flags & FLAG.EVAP_FAILING);
 
   const trend  = trendRate(history, now);          // 10-min rate, shown on screen
   const recent = trendRate(history, now, 4, 2);    // last few minutes: still rising?
@@ -279,20 +267,20 @@ function _render(root, data) {
                                   'Start my break';
   btn.disabled = setup === 'running';
 
-  // ── weather (real only; hidden when it didn't load) ──
+  // ── air: EMB.R's air sensor (live only) and the weather (real only); hidden when neither ──
+  const fresh = kind !== 'offline';
   const w = data.weather;
-  const weatherEl = root.querySelector('[data-field="weather"]');
+  const air = [];
+  if (fresh && Number.isFinite(latest.airC)) air.push(`Air near you ${Math.round(latest.airC)}°C`);
   if (w && Number.isFinite(w.tempC) && Number.isFinite(w.humidity)) {
-    weatherEl.textContent = `Here now: air ${Math.round(w.tempC)}°C · humidity ${Math.round(w.humidity)}%`;
-    weatherEl.hidden = false;
-  } else {
-    weatherEl.hidden = true;
+    air.push(`${air.length ? 'outside' : 'Outside'} ${Math.round(w.tempC)}°C · humidity ${Math.round(w.humidity)}%`);
   }
+  const weatherEl = root.querySelector('[data-field="weather"]');
+  weatherEl.textContent = air.join(' · ');
+  weatherEl.hidden = air.length === 0;
 
   // ── vitals + chart (live values only while connected; battery is never shown) ──
-  const fresh = kind !== 'offline';
   _set(root, 'hr',      fresh && hr ? `${Math.round(hr)}` : '—');
-  _set(root, 'hrq',     fresh && hr ? (HRQ_TEXT[latest.hrQuality] ?? '') : '');
   _set(root, 'motion',  fresh && latest.activity != null ? (latest.activity >= MOVING_G ? 'moving' : 'still') : '—');
   _set(root, 'skinNow', fresh && skinC ? skinC.toFixed(1) : '—');
   _drawChart(root, history, now);
@@ -468,6 +456,7 @@ function _offlineReason({ source, link }) {
   if (link === 'reconnecting') return 'Lost the connection to EMB.R. Reconnecting…';
   if (link === 'stalled')      return 'EMB.R has stopped sending. Check it is switched on and close by.';
   if (source === 'demo')       return 'The demo is stopped. Connect EMB.R or restart the demo from the menu at the top.';
+  if (source === 'replay')     return 'The replay is stopped. Connect EMB.R or restart the replay from the menu at the top.';
   return 'Connect EMB.R from the menu at the top.';
 }
 
@@ -527,8 +516,6 @@ function _template() {
       <strong data-field="reason">Your sensors disagree right now.</strong>
       <p data-field="pausedNote">EMB.R won't show a number it can't stand behind. It will come back on its own.</p>
     </div>
-
-    <p class="hero__note" data-field="evap" hidden>Your body is struggling to cool down.</p>
   </section>
 
   <div class="personal__body">
@@ -573,7 +560,7 @@ function _template() {
     <section class="card trend-card" aria-label="Last 30 minutes">
       <div class="trend-card__head">
         <strong>Last 30 min</strong>
-        <span>HR <span data-field="hr">—</span> bpm<span data-field="hrq"></span> · <span data-field="motion">—</span></span>
+        <span>HR <span data-field="hr">—</span> bpm · <span data-field="motion">—</span></span>
       </div>
       <div class="chart-wrap">
       <p class="chart-empty" data-field="chartEmpty">Collecting data…</p>

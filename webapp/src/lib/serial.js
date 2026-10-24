@@ -1,7 +1,7 @@
 /**
  * serial.js — USB serial link to the device, for the bench (Chrome, Web Serial).
  *
- * Sends START and reads the firmware's 24-column CSV at 1 Hz. Each row becomes
+ * Sends START and reads the firmware's 19-column CSV at 1 Hz. Each row becomes
  * the same frame shape decodeFrame() returns, so the rest of the app can't
  * tell USB from Bluetooth. The worn demo uses Bluetooth (ble.js).
  *
@@ -12,8 +12,8 @@
 import { STATE, FLAG, HRQ, reasonFlag, FLAG_TEXT } from './frame.js';
 
 const BAUD = 115200;
-export const CSV_HEADER = 'ms,hrA,sqiA,hrB,sqiB,hr,hr_q,step_hz,act_g,skinA,skinB,skin,skin_q,' +
-  'micro_c,micro_rh,evap_kpa,vbat,ct_est,ct_lo,ct_hi,kalman_half,filter_step,state,flags';
+export const CSV_HEADER = 'ms,hr,sqi,hr_q,step_hz,act_g,skinA,skinB,skin,skin_q,air_c,vbat,' +
+  'ct_est,ct_lo,ct_hi,kalman_half,filter_step,state,flags';
 const FIELDS = CSV_HEADER.split(',');
 
 const START_RETRY_MS = 3_000;   // resend START if no header yet (the board may reset when the port opens)
@@ -73,13 +73,9 @@ export function csvLineToFrame(line) {
     hr:              hr === 0 ? null : hr,
     hrQuality:       parseInt(r.hr_q, 10) || HRQ.NONE,
     skin:            _num(r.skin),
-    microC:          _num(r.micro_c),
-    microRh:         _num(r.micro_rh),
-    evapKpa:         _num(r.evap_kpa),
+    airC:            _num(r.air_c),
     battery:         null,          // the power-bank build has no battery
     activity:        _num(r.act_g),
-    hrA:             _num(r.hrA) || null,
-    hrB:             _num(r.hrB) || null,
   };
 }
 

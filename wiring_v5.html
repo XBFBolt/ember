@@ -1,0 +1,1098 @@
+<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Ember Wiring v5</title><style>
+/* Layout: a workshop manual. Sticky phase index on the left, one reading
+   column on the right; diagrams break out to the full content width. */
+:root {
+  --paper: #f3f5f6;
+  --panel: #ffffff;
+  --ink: #172026;
+  --ink-2: #4b5a64;
+  --ink-3: #7b8992;
+  --rule: #d6dde1;
+  --tint: #e8edf0;
+  --accent: #c8461a;
+  --accent-soft: #fbe9e1;
+  --ok: #2c7a4b;
+  --ok-soft: #e3f2e8;
+  --warn: #9a6a12;
+  --warn-soft: #fbf1db;
+  --pcb: #dfe9d6;
+  --pcb-pad: #b7a36a;
+  --devkit: #252c32;
+  --devkit-2: #3a434a;
+  --module: #8e989f;
+  --case: #c9d0d5;
+  --cavity: #eef1f3;
+  --print: #b9c3ca;
+  --lipo: #c3cdd4;
+  --w-3v3: #d7263d;
+  --w-gnd: #262b2f;
+  --w-5v: #e0731f;
+  --w-vbat: #a0522d;
+  --w-vsense: #b07c00;
+  --w-sda: #1f6fd1;
+  --w-scl: #c9a000;
+  --w-ppga: #23944f;
+  --w-ppgb: #8a3fb0;
+  --w-ntca: #0b8f9a;
+  --w-ntcb: #d1458a;
+  --w-ntcc: #8a3fb0;
+  --display: "Saira Semi Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12171a; --panel: #1a2125; --ink: #e5ebee; --ink-2: #a3b1ba; --ink-3: #7a8a94;
+    --rule: #2d373d; --tint: #212a2f; --accent: #ff7a45; --accent-soft: #3a2219;
+    --ok: #5fc58a; --ok-soft: #17301f; --warn: #e5b452; --warn-soft: #33290f;
+    --pcb: #22382a; --pcb-pad: #8c7c4c; --devkit: #0b0e10; --devkit-2: #2a3238; --module: #5d6870;
+    --case: #3a454c; --cavity: #1c2428; --print: #4a565e; --lipo: #3e4b54;
+    --w-3v3: #ff5a6c; --w-gnd: #c3ccd2; --w-5v: #ff9a4a; --w-vbat: #d58a5e; --w-vsense: #e6b53a;
+    --w-sda: #5aa2ff; --w-scl: #f2cf3c; --w-ppga: #4fcf83; --w-ppgb: #c27ae8; --w-ntca: #3fd0db; --w-ntcb: #ff7ab8; --w-ntcc: #c27ae8;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #12171a; --panel: #1a2125; --ink: #e5ebee; --ink-2: #a3b1ba; --ink-3: #7a8a94;
+  --rule: #2d373d; --tint: #212a2f; --accent: #ff7a45; --accent-soft: #3a2219;
+  --ok: #5fc58a; --ok-soft: #17301f; --warn: #e5b452; --warn-soft: #33290f;
+  --pcb: #22382a; --pcb-pad: #8c7c4c; --devkit: #0b0e10; --devkit-2: #2a3238; --module: #5d6870;
+  --case: #3a454c; --cavity: #1c2428; --print: #4a565e; --lipo: #3e4b54;
+  --w-3v3: #ff5a6c; --w-gnd: #c3ccd2; --w-5v: #ff9a4a; --w-vbat: #d58a5e; --w-vsense: #e6b53a;
+  --w-sda: #5aa2ff; --w-scl: #f2cf3c; --w-ppga: #4fcf83; --w-ppgb: #c27ae8; --w-ntca: #3fd0db; --w-ntcb: #ff7ab8; --w-ntcc: #c27ae8;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink);
+  font: 16px/1.6 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.shell { max-width: 1240px; margin: 0 auto; display: grid; grid-template-columns: 228px minmax(0, 1fr); gap: 48px; padding-block: 40px 96px; }
+nav.index { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; max-height: calc(100vh - 48px); overflow: auto; font-size: 14px; }
+nav.index .brand { font: 700 15px/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: 18px; }
+nav.index ol { list-style: none; margin: 0 0 20px; padding: 0; display: grid; gap: 2px; }
+nav.index a { display: flex; justify-content: space-between; gap: 8px; color: var(--ink-2); text-decoration: none; padding: 4px 8px; border-radius: 4px; }
+nav.index a:hover, nav.index a:focus-visible { background: var(--tint); color: var(--ink); outline: none; }
+nav.index .grp { font: 600 11px/1 var(--display); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); margin: 14px 8px 6px; }
+nav.index .prog { font: 12px var(--mono); color: var(--ink-3); }
+nav.index .prog.done { color: var(--ok); }
+main { min-width: 0; }
+
+header.top { padding-bottom: 28px; border-bottom: 1px solid var(--rule); margin-bottom: 36px; }
+.eyebrow-h { font: 600 13px/1 var(--display); letter-spacing: .18em; text-transform: uppercase; color: var(--accent); }
+h1 { font: 700 clamp(40px, 6vw, 64px)/1 var(--display); letter-spacing: -.01em; margin: 12px 0 14px; text-wrap: balance; }
+.lede { font-size: 19px; color: var(--ink-2); max-width: 62ch; margin: 0; }
+.spec { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 22px; font: 13px var(--mono); color: var(--ink-2); }
+.spec b { color: var(--ink); font-weight: 600; }
+
+section { margin-bottom: 64px; scroll-margin-top: 24px; }
+h2 { font: 700 30px/1.1 var(--display); margin: 0 0 6px; text-wrap: balance; display: flex; align-items: baseline; gap: 14px; }
+h2 .ph { font: 600 14px/1 var(--mono); color: var(--accent); border: 1.5px solid var(--accent); border-radius: 4px; padding: 5px 7px; flex: none; }
+h3 { font: 600 20px/1.25 var(--display); margin: 32px 0 8px; }
+.sub { color: var(--ink-2); margin: 0 0 20px; max-width: 68ch; }
+p, li { max-width: 70ch; }
+code, .cmd { font-family: var(--mono); font-size: .88em; }
+code { background: var(--tint); padding: 1px 5px; border-radius: 3px; }
+.cmd { display: inline-block; background: var(--ink); color: var(--paper); padding: 1px 7px; border-radius: 3px; font-weight: 600; letter-spacing: .02em; }
+a { color: var(--accent); }
+
+.callout { border: 1px solid var(--rule); border-left: 4px solid var(--warn); background: var(--warn-soft); padding: 16px 20px; border-radius: 4px; margin: 0 0 24px; }
+.callout h3 { margin: 0 0 8px; font-size: 18px; }
+.callout ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.callout.read { border-left-color: var(--accent); background: var(--accent-soft); }
+
+ol.steps { list-style: none; counter-reset: s; margin: 0; padding: 0; display: grid; gap: 2px; }
+ol.steps > li { counter-increment: s; display: grid; grid-template-columns: 28px 40px minmax(0, 1fr); gap: 0 10px; padding: 12px 0; border-top: 1px solid var(--rule); max-width: none; }
+ol.steps > li::before { content: counter(s); font: 600 14px/26px var(--mono); color: var(--ink-3); text-align: right; }
+ol.steps > li > input { margin: 5px 0 0 10px; width: 18px; height: 18px; accent-color: var(--ok); }
+ol.steps > li > div { min-width: 0; }
+ol.steps > li > div > p:first-child { margin-top: 0; }
+ol.steps > li > div > :last-child { margin-bottom: 0; }
+ol.steps > li.done > div { color: var(--ink-3); }
+ol.steps strong { color: var(--ink); }
+ol.steps > li.done strong { color: var(--ink-3); }
+
+.gate { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 16px; align-items: start; border: 2px solid var(--accent); border-radius: 6px; padding: 14px 18px; margin: 18px 0 8px; background: var(--panel); }
+.gate .tag { font: 700 13px/1 var(--display); letter-spacing: .2em; color: var(--panel); background: var(--accent); padding: 6px 8px; border-radius: 3px; }
+.gate p { margin: 0; }
+.gate ul { margin: 6px 0 0; padding-left: 18px; }
+
+figure { margin: 24px 0 32px; background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 18px; }
+figure .scroll { overflow-x: auto; }
+figcaption { font-size: 14px; color: var(--ink-2); margin-top: 12px; max-width: 80ch; }
+svg.dg { display: block; width: 100%; height: auto; min-width: 640px; }
+.dg text { fill: var(--ink); font-family: var(--mono); font-size: 12px; }
+.dg .t { font-size: 12px; }
+.dg .tb { font-family: var(--body); font-weight: 600; font-size: 13.5px; }
+.dg .ts { font-family: var(--body); font-size: 12.5px; fill: var(--ink-2); }
+.dg .tl { font-size: 11.5px; fill: var(--ink-2); }
+.dg .tw { fill: #e8edf0; font-size: 11px; font-family: var(--mono); }
+.dg .pin { font-size: 11px; fill: var(--ink); font-weight: 600; }
+.dg .eyebrow { font: 600 12px var(--display); letter-spacing: .16em; fill: var(--accent); }
+.dg .box { fill: var(--panel); stroke: var(--ink); stroke-width: 1.4; }
+.dg .box.main { fill: var(--tint); stroke-width: 2; }
+.dg .box.hot { stroke: var(--accent); stroke-width: 2; }
+.dg .ln { stroke: var(--ink); stroke-width: 1.8; fill: none; }
+.dg .ln.thin { stroke-width: 1; }
+.dg .ln.accent { stroke: var(--accent); stroke-width: 2.2; }
+.dg .ahead { fill: var(--ink); }
+.dg .sym { stroke: var(--ink); stroke-width: 1.8; fill: none; stroke-linejoin: round; }
+.dg .sym.thick { stroke-width: 3.4; }
+.dg .symfill { fill: var(--ink); }
+.dg .jn { fill: var(--ink); }
+.dg .w-3v3 { stroke: var(--w-3v3); } .dg .w-gnd { stroke: var(--w-gnd); } .dg .w-5v { stroke: var(--w-5v); }
+.dg .w-vbat { stroke: var(--w-vbat); } .dg .w-vsense { stroke: var(--w-vsense); } .dg .w-sda { stroke: var(--w-sda); }
+.dg .w-scl { stroke: var(--w-scl); } .dg .w-ppga { stroke: var(--w-ppga); } .dg .w-ppgb { stroke: var(--w-ppgb); }
+.dg .w-ntca { stroke: var(--w-ntca); } .dg .w-ntcb { stroke: var(--w-ntcb); } .dg .w-ntcc { stroke: var(--w-ntcc); }
+.dg .case { fill: var(--case); stroke: var(--ink-3); stroke-width: 1; }
+.dg .cavity { fill: var(--cavity); stroke: var(--ink-3); stroke-width: 1; }
+.dg .gap { fill: var(--paper); stroke: none; }
+.dg .boss { fill: var(--print); stroke: var(--ink-3); stroke-width: 1; }
+.dg .hole { fill: var(--cavity); stroke: var(--ink-3); stroke-width: 1; }
+.dg .window { fill: none; stroke: var(--ink-2); stroke-width: 1.5; }
+.dg .pcb { fill: var(--pcb); stroke: var(--ink-3); stroke-width: 1; opacity: .96; }
+.dg .pad { fill: var(--pcb-pad); }
+.dg .mhole { fill: var(--cavity); stroke: var(--ink-3); stroke-width: 1; }
+.dg .rail { stroke-width: 6; stroke-linecap: round; opacity: .85; }
+.dg .devkit { fill: var(--devkit); }
+.dg .module { fill: var(--module); }
+.dg .usb { fill: #c9d0d5; stroke: #6f7a82; stroke-width: 1.5; }
+.dg .pinu { fill: #f1d36b; stroke: var(--ink); stroke-width: 1; }
+.dg .pinx { fill: #6f7a82; }
+.dg .imu { fill: #2f5aa8; fill-opacity: .18; stroke: #2f5aa8; stroke-width: 1.5; }
+.dg .lead { stroke: #8f979c; stroke-width: 2; }
+.dg .res { fill: #e7d3a8; stroke: #8a6d33; stroke-width: 1.2; }
+.dg .diode { fill: #2b2b2b; stroke: #000; stroke-width: 1; }
+.dg .band { fill: #d9dde0; }
+.dg .bridge { stroke-width: 6; stroke-linecap: round; opacity: .9; }
+.dg .wire { stroke-width: 3; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.dg .deckring { fill: none; stroke-width: 3; }
+.dg .secbody { fill: var(--print); stroke: var(--ink-3); stroke-width: 1; }
+.dg .secgap { fill: var(--panel); }
+.dg .bead { fill: #2b2b2b; stroke: var(--ink); stroke-width: 1; }
+.dg .glue { stroke: var(--ink-3); stroke-width: 1.6; fill: none; }
+.dg .gluefill { fill: var(--tint); stroke: var(--ink-3); stroke-width: 1; }
+.dg .pod { fill: var(--print); stroke: var(--ink); stroke-width: 1.6; }
+.dg .cable { fill: none; stroke: var(--ink-2); stroke-width: 3.2; stroke-linecap: round; }
+.dg .lipo { fill: var(--lipo); stroke: var(--ink-3); stroke-width: 1.2; }
+.dg .pcbsec { fill: #4f7a45; }
+.dg .spacer { fill: #2b2b2b; }
+.dg .devsec { fill: var(--devkit); stroke: var(--ink-3); stroke-width: .8; }
+.dg .modsec { fill: var(--module); }
+.dg .usbsec { fill: #c9d0d5; stroke: #6f7a82; }
+.dg .plug { fill: var(--ink-2); }
+.dg .tick { stroke: var(--ink-3); stroke-width: 1; }
+.dg .torso { fill: var(--tint); stroke: var(--ink-3); stroke-width: 1.5; }
+.dg .neck, .dg .hint { fill: none; stroke: var(--ink-3); stroke-width: 1.2; }
+.dg .strap { fill: #3d4a52; fill-opacity: .55; stroke: var(--ink-3); stroke-width: 1; }
+.dg .casefront { fill: var(--print); stroke: var(--ink); stroke-width: 1.6; }
+.dg .lead2 { fill: none; stroke-width: 2.4; }
+.dg .ppg { fill: #3a3f44; stroke: #23944f; stroke-width: 3; }
+.dg .sht { fill: #1f6fd1; }
+.dg .skin { fill: none; stroke: #c98b6b; stroke-width: 6; }
+.dg .shirt { stroke: var(--ink-3); stroke-width: 2; stroke-dasharray: 8 6; }
+.dg .strapline { fill: none; stroke: #3d4a52; stroke-width: 6; opacity: .7; stroke-linejoin: round; }
+.dg .skinline { fill: none; stroke: #c98b6b; stroke-width: 5; }
+.dg .shirtline { fill: none; stroke: var(--ink-3); stroke-width: 2; stroke-dasharray: 8 6; }
+
+table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--panel); margin: 16px 0 24px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 600 12px var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); background: var(--tint); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td.num, td.mono { font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td .muted, .muted { color: var(--ink-3); }
+.sw { display: inline-block; width: 22px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 9px; background: currentColor; }
+.sw.w-3v3 { color: var(--w-3v3); } .sw.w-gnd { color: var(--w-gnd); } .sw.w-5v { color: var(--w-5v); }
+.sw.w-vbat { color: var(--w-vbat); } .sw.w-vsense { color: var(--w-vsense); } .sw.w-sda { color: var(--w-sda); }
+.sw.w-scl { color: var(--w-scl); } .sw.w-ppga { color: var(--w-ppga); } .sw.w-ppgb { color: var(--w-ppgb); }
+.sw.w-ntca { color: var(--w-ntca); } .sw.w-ntcb { color: var(--w-ntcb); } .sw.w-ntcc { color: var(--w-ntcc); }
+.chk { width: 17px; height: 17px; accent-color: var(--ok); }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+.card { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 16px 18px; min-width: 0; }
+.card h4 { font: 600 16px var(--display); margin: 0 0 8px; letter-spacing: .02em; }
+.card ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 15px; }
+pre { background: var(--ink); color: var(--paper); padding: 14px 16px; border-radius: 6px; overflow-x: auto; font: 13px/1.55 var(--mono); margin: 12px 0 18px; }
+pre .c { color: #8fa3ae; }
+.expect { font: 13px/1.5 var(--mono); background: var(--ok-soft); border-left: 3px solid var(--ok); padding: 8px 12px; border-radius: 3px; margin: 8px 0; color: var(--ink); white-space: pre-wrap; overflow-x: auto; }
+.reset { font: 13px var(--body); color: var(--ink-3); background: none; border: 1px solid var(--rule); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+.reset:hover, .reset:focus-visible { color: var(--ink); border-color: var(--ink-3); outline: none; }
+
+@media (max-width: 900px) {
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 0; padding-top: 24px; }
+  nav.index { position: static; max-height: none; border-bottom: 1px solid var(--rule); padding-bottom: 16px; margin-bottom: 28px; }
+  nav.index ol { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  ol.steps > li { grid-template-columns: 22px 34px minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style></head><body><main style="max-width:1100px;margin:0 auto;padding:24px 16px">
+<h1>Ember wiring, v5</h1>
+<p>One pulse sensor, three thermistors (two skin, one ambient) and the IMU. The SHT40 and pulse sensor B are gone. The ambient thermistor takes GPIO5 with its own 10k resistor (R3), wired exactly like the skin thermistors.</p>
+<h2>Pin map</h2><table class="nl"><thead><tr><th>ESP32-S3 pin</th><th>Goes to</th></tr></thead><tbody>
+<tr><td class="mono">3V3 (J1-1)</td><td><span class="sw w-3v3"></span>3V3 rail: pulse +, IMU VCC, R1, R2, R3</td></tr>
+<tr><td class="mono">G (J1-22)</td><td><span class="sw w-gnd"></span>GND rail: pulse −, IMU GND, the far leg of all three thermistors, R4</td></tr>
+<tr><td class="mono">GPIO4 (J1-4)</td><td><span class="sw w-ppga"></span>Pulse sensor S</td></tr>
+<tr><td class="mono">GPIO5 (J1-5)</td><td><span class="sw w-ntcc"></span>Node C: R3 + ambient thermistor (was pulse B)</td></tr>
+<tr><td class="mono">GPIO6 (J1-6)</td><td><span class="sw w-ntca"></span>Node A: R1 + skin thermistor A</td></tr>
+<tr><td class="mono">GPIO7 (J1-7)</td><td><span class="sw w-ntcb"></span>Node B: R2 + skin thermistor B</td></tr>
+<tr><td class="mono">GPIO8 (J1-12)</td><td><span class="sw w-vsense"></span>R4 to GND (unchanged)</td></tr>
+<tr><td class="mono">GPIO17 / 18</td><td><span class="sw w-sda"></span>IMU SDA / SCL only</td></tr>
+<tr><td class="mono">5V (J1-21)</td><td>Not used. Power comes in through USB-C from the power bank.</td></tr>
+</tbody></table>
+<h2>System</h2><svg class="dg" viewBox="0 0 972 462" role="img" aria-label="Power comes from a 4,000 mAh power bank through one USB cable into the DevKitC; a pulse sensor and three thermistors feed analog inputs, the IMU uses I2C; results go to the phone over Bluetooth." xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahead"/></marker></defs>
+<rect x="20.0" y="236.0" width="170.0" height="66.0" rx="6" class="box hot"/>
+<text x="105.0" y="262.0" class="tb" text-anchor="middle" >Power bank</text>
+<text x="105.0" y="282.0" class="ts" text-anchor="middle" >4,000 mAh · 5 V out</text>
+<line x1="190.0" y1="269.0" x2="478.0" y2="269.0" class="ln w-5v" marker-end="url(#ah)"/>
+<text x="334.0" y="258.0" class="tl" text-anchor="middle" >USB cable → USB-C port</text>
+<text x="105.0" y="326.0" class="ts" text-anchor="middle" >worn in its own pod</text>
+<text x="105.0" y="342.0" class="ts" text-anchor="middle" >at the side of the strap</text>
+<text x="334.0" y="296.0" class="ts" text-anchor="middle" >same port the laptop uses:</text>
+<text x="334.0" y="312.0" class="ts" text-anchor="middle" >one or the other, never both</text>
+<rect x="290.0" y="352.0" width="112.0" height="44.0" rx="6" class="box"/>
+<text x="346.0" y="372.0" class="tb" text-anchor="middle" >R4 10k</text>
+<text x="346.0" y="388.0" class="ts" text-anchor="middle" >to GND</text>
+<line x1="402.0" y1="374.0" x2="478.0" y2="374.0" class="ln w-vsense" marker-end="url(#ah)"/>
+<text x="440.0" y="364.0" class="tl" text-anchor="middle" >GPIO8</text>
+<text x="346.0" y="418.0" class="ts" text-anchor="middle" >holds battery sense at 0 V,</text>
+<text x="346.0" y="434.0" class="ts" text-anchor="middle" >so the app shows USB power</text>
+<rect x="480.0" y="150.0" width="210.0" height="280.0" rx="10" class="box main"/>
+<text x="585.0" y="176.0" class="tb" text-anchor="middle" >ESP32-S3 DevKitC-1</text>
+<text x="585.0" y="206.0" class="ts" text-anchor="middle" >5 V → 3.3 V regulator</text>
+<text x="585.0" y="230.0" class="ts" text-anchor="middle" >ADC1: GPIO4 – 8</text>
+<text x="585.0" y="254.0" class="ts" text-anchor="middle" >I²C: GPIO17 / 18</text>
+<text x="585.0" y="278.0" class="ts" text-anchor="middle" >Bluetooth LE radio</text>
+<text x="585.0" y="302.0" class="ts" text-anchor="middle" >ECTemp · conformal · flags</text>
+<text x="585.0" y="338.0" class="ts" text-anchor="middle" >3V3 out powers</text>
+<text x="585.0" y="354.0" class="ts" text-anchor="middle" >every sensor</text>
+<rect x="480.0" y="30.0" width="210.0" height="48.0" rx="6" class="box"/>
+<text x="585.0" y="59.0" class="tb" text-anchor="middle" >Laptop (USB-C)</text>
+<line x1="585.0" y1="78.0" x2="585.0" y2="148.0" class="ln" marker-end="url(#ah)"/>
+<text x="595.0" y="118.0" class="tl" text-anchor="start" >flash · serial</text>
+<rect x="752.0" y="30.0" width="200.0" height="48.0" rx="6" class="box"/>
+<text x="852.0" y="59.0" class="tb" text-anchor="middle" >Phone app</text>
+<polyline points="690.0,166.0 900.0,166.0 900.0,80.0" class="ln accent" fill="none" marker-end="url(#ah)"/>
+<text x="892.0" y="114.0" class="tl" text-anchor="end" >BLE notify</text>
+<text x="892.0" y="130.0" class="tl" text-anchor="end" >1 Hz · 20 B</text>
+<polyline points="800.0,80.0 800.0,142.0 692.0,142.0" class="ln" fill="none" marker-end="url(#ah)" stroke-dasharray="5 4"/>
+<text x="792.0" y="110.0" class="tl" text-anchor="end" >commands</text>
+<rect x="782.0" y="186.0" width="170.0" height="40.0" rx="6" class="box"/>
+<text x="867.0" y="211.0" class="tb" text-anchor="middle" >Pulse sensor</text>
+<line x1="780.0" y1="206.0" x2="692.0" y2="206.0" class="ln w-ppga" marker-end="url(#ah)"/>
+<text x="736.0" y="199.0" class="tl" text-anchor="middle" >GPIO4</text>
+<rect x="782.0" y="236.0" width="170.0" height="40.0" rx="6" class="box"/>
+<text x="867.0" y="261.0" class="tb" text-anchor="middle" >Ambient therm. C</text>
+<line x1="780.0" y1="256.0" x2="692.0" y2="256.0" class="ln w-ntcc" marker-end="url(#ah)"/>
+<text x="736.0" y="249.0" class="tl" text-anchor="middle" >GPIO5</text>
+<rect x="782.0" y="286.0" width="170.0" height="40.0" rx="6" class="box"/>
+<text x="867.0" y="311.0" class="tb" text-anchor="middle" >Skin therm. A</text>
+<line x1="780.0" y1="306.0" x2="692.0" y2="306.0" class="ln w-ntca" marker-end="url(#ah)"/>
+<text x="736.0" y="299.0" class="tl" text-anchor="middle" >GPIO6</text>
+<rect x="782.0" y="336.0" width="170.0" height="40.0" rx="6" class="box"/>
+<text x="867.0" y="361.0" class="tb" text-anchor="middle" >Skin therm. B</text>
+<line x1="780.0" y1="356.0" x2="692.0" y2="356.0" class="ln w-ntcb" marker-end="url(#ah)"/>
+<text x="736.0" y="349.0" class="tl" text-anchor="middle" >GPIO7</text>
+<rect x="782.0" y="386.0" width="170.0" height="40.0" rx="6" class="box"/>
+<text x="867.0" y="411.0" class="tb" text-anchor="middle" >IMU</text>
+<line x1="780.0" y1="406.0" x2="692.0" y2="406.0" class="ln w-sda" marker-end="url(#ah)"/>
+<text x="736.0" y="399.0" class="tl" text-anchor="middle" >I²C 17/18</text>
+<text x="736.0" y="448.0" class="tl" text-anchor="middle" >analog: pulse + thermistors</text>
+</svg>
+
+<h2>Schematic</h2><svg class="dg" viewBox="0 0 1000 410" role="img" aria-label="Schematic: the power bank feeding the DevKitC over USB, R4 holding GPIO8 low; three 10k thermistor dividers on GPIO6, GPIO7 and GPIO5 (ambient); pulse sensor, ambient thermistor and IMU pin by pin." xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahead"/></marker></defs>
+<text x="20.0" y="30.0" class="eyebrow" text-anchor="start" >POWER</text>
+<rect x="20.0" y="70.0" width="108.0" height="54.0" rx="6" class="box hot"/>
+<text x="74.0" y="94.0" class="tb" text-anchor="middle" >Power bank</text>
+<text x="74.0" y="112.0" class="ts" text-anchor="middle" >5 V · 2.1 A max</text>
+<line x1="128.0" y1="97.0" x2="222.0" y2="97.0" class="sym w-5v"/>
+<text x="175.0" y="88.0" class="tl" text-anchor="middle" >USB cable</text>
+<rect x="222.0" y="64.0" width="142.0" height="66.0" rx="6" class="box"/>
+<text x="293.0" y="86.0" class="tb" text-anchor="middle" >DevKitC USB-C</text>
+<text x="293.0" y="104.0" class="ts" text-anchor="middle" >5 V → regulator</text>
+<text x="293.0" y="120.0" class="ts" text-anchor="middle" >→ 3V3 (J1-1)</text>
+<text x="200.0" y="176.0" class="pin" text-anchor="start" >J1-12</text>
+<text x="244.0" y="176.0" class="tl" text-anchor="start" >GPIO8</text>
+<line x1="196.0" y1="186.0" x2="250.0" y2="186.0" class="sym w-vsense"/>
+<circle cx="250.0" cy="186.0" r="3.5" class="jn"/>
+<polyline points="250.0,186.0 250.0,204.0 258.0,208.5 242.0,217.5 258.0,226.5 242.0,235.5 258.0,244.5 242.0,253.5 250.0,258.0 250.0,276.0" class="sym" fill="none"/>
+<text x="264.0" y="236.0" class="ts" text-anchor="start" >R4 10k</text>
+<line x1="250.0" y1="276.0" x2="250.0" y2="284.0" class="sym"/><line x1="238.0" y1="284.0" x2="262.0" y2="284.0" class="sym"/><line x1="243.0" y1="289.0" x2="257.0" y2="289.0" class="sym"/><line x1="247.0" y1="294.0" x2="253.0" y2="294.0" class="sym"/>
+<text x="20.0" y="330.0" class="ts" text-anchor="start" >J1-21 (5V pin): not used.</text>
+<text x="20.0" y="348.0" class="ts" text-anchor="start" >R4 keeps GPIO8 from floating. The firmware</text>
+<text x="20.0" y="366.0" class="ts" text-anchor="start" >then reads “no battery” and reports USB power</text>
+<text x="20.0" y="384.0" class="ts" text-anchor="start" >instead of a dying cell it would sleep to protect.</text>
+<text x="430.0" y="30.0" class="eyebrow" text-anchor="start" >THERMISTORS ×3 (2 SKIN + AMBIENT)</text>
+<line x1="440.0" y1="70.0" x2="680.0" y2="70.0" class="sym w-3v3"/>
+<text x="450.0" y="62.0" class="tl" text-anchor="start" >J1-1  3V3</text>
+<circle cx="460.0" cy="70.0" r="3.5" class="jn"/>
+<polyline points="460.0,70.0 460.0,88.0 468.0,92.5 452.0,101.5 468.0,110.5 452.0,119.5 468.0,128.5 452.0,137.5 460.0,142.0 460.0,160.0" class="sym" fill="none"/>
+<text x="474.0" y="120.0" class="ts" text-anchor="start" >R1 10k</text>
+<circle cx="460.0" cy="172.0" r="3.5" class="jn"/>
+<line x1="460.0" y1="160.0" x2="460.0" y2="184.0" class="sym w-ntca"/>
+<line x1="460.0" y1="172.0" x2="494.0" y2="172.0" class="sym w-ntca"/>
+<text x="466.0" y="196.0" class="pin" text-anchor="start" >GPIO6 J1-6</text>
+<polyline points="460.0,208.0 460.0,224.4 468.0,228.5 452.0,236.7 468.0,244.9 452.0,253.1 468.0,261.3 452.0,269.5 460.0,273.6 460.0,290.0" class="sym w-ntca" fill="none"/>
+<line x1="446.0" y1="268.0" x2="474.0" y2="228.0" class="sym"/>
+<text x="474.0" y="256.0" class="ts" text-anchor="start" >NTC A</text>
+<text x="474.0" y="272.0" class="ts" text-anchor="start" >skin</text>
+<line x1="460.0" y1="184.0" x2="460.0" y2="208.0" class="sym w-ntca"/>
+<line x1="460.0" y1="290.0" x2="460.0" y2="298.0" class="sym"/><line x1="448.0" y1="298.0" x2="472.0" y2="298.0" class="sym"/><line x1="453.0" y1="303.0" x2="467.0" y2="303.0" class="sym"/><line x1="457.0" y1="308.0" x2="463.0" y2="308.0" class="sym"/>
+<circle cx="552.0" cy="70.0" r="3.5" class="jn"/>
+<polyline points="552.0,70.0 552.0,88.0 560.0,92.5 544.0,101.5 560.0,110.5 544.0,119.5 560.0,128.5 544.0,137.5 552.0,142.0 552.0,160.0" class="sym" fill="none"/>
+<text x="566.0" y="120.0" class="ts" text-anchor="start" >R2 10k</text>
+<circle cx="552.0" cy="172.0" r="3.5" class="jn"/>
+<line x1="552.0" y1="160.0" x2="552.0" y2="184.0" class="sym w-ntcb"/>
+<line x1="552.0" y1="172.0" x2="586.0" y2="172.0" class="sym w-ntcb"/>
+<text x="558.0" y="196.0" class="pin" text-anchor="start" >GPIO7 J1-7</text>
+<polyline points="552.0,208.0 552.0,224.4 560.0,228.5 544.0,236.7 560.0,244.9 544.0,253.1 560.0,261.3 544.0,269.5 552.0,273.6 552.0,290.0" class="sym w-ntcb" fill="none"/>
+<line x1="538.0" y1="268.0" x2="566.0" y2="228.0" class="sym"/>
+<text x="566.0" y="256.0" class="ts" text-anchor="start" >NTC B</text>
+<text x="566.0" y="272.0" class="ts" text-anchor="start" >skin</text>
+<line x1="552.0" y1="184.0" x2="552.0" y2="208.0" class="sym w-ntcb"/>
+<line x1="552.0" y1="290.0" x2="552.0" y2="298.0" class="sym"/><line x1="540.0" y1="298.0" x2="564.0" y2="298.0" class="sym"/><line x1="545.0" y1="303.0" x2="559.0" y2="303.0" class="sym"/><line x1="549.0" y1="308.0" x2="555.0" y2="308.0" class="sym"/>
+<circle cx="644.0" cy="70.0" r="3.5" class="jn"/>
+<polyline points="644.0,70.0 644.0,88.0 652.0,92.5 636.0,101.5 652.0,110.5 636.0,119.5 652.0,128.5 636.0,137.5 644.0,142.0 644.0,160.0" class="sym" fill="none"/>
+<text x="658.0" y="120.0" class="ts" text-anchor="start" >R3 10k</text>
+<circle cx="644.0" cy="172.0" r="3.5" class="jn"/>
+<line x1="644.0" y1="160.0" x2="644.0" y2="184.0" class="sym w-ntcc"/>
+<line x1="644.0" y1="172.0" x2="678.0" y2="172.0" class="sym w-ntcc"/>
+<text x="650.0" y="196.0" class="pin" text-anchor="start" >GPIO5 J1-5</text>
+<polyline points="644.0,208.0 644.0,224.4 652.0,228.5 636.0,236.7 652.0,244.9 636.0,253.1 652.0,261.3 636.0,269.5 644.0,273.6 644.0,290.0" class="sym w-ntcc" fill="none"/>
+<line x1="630.0" y1="268.0" x2="658.0" y2="228.0" class="sym"/>
+<text x="658.0" y="256.0" class="ts" text-anchor="start" >NTC C</text>
+<text x="658.0" y="272.0" class="ts" text-anchor="start" >air</text>
+<line x1="644.0" y1="184.0" x2="644.0" y2="208.0" class="sym w-ntcc"/>
+<line x1="644.0" y1="290.0" x2="644.0" y2="298.0" class="sym"/><line x1="632.0" y1="298.0" x2="656.0" y2="298.0" class="sym"/><line x1="637.0" y1="303.0" x2="651.0" y2="303.0" class="sym"/><line x1="641.0" y1="308.0" x2="647.0" y2="308.0" class="sym"/>
+<text x="430.0" y="352.0" class="ts" text-anchor="start" >25 °C → 1650 mV · 33 °C → 1365 mV</text>
+<text x="430.0" y="370.0" class="ts" text-anchor="start" >Self-heating 0.04 °C: tie straight to 3V3.</text>
+<text x="430.0" y="388.0" class="ts" text-anchor="start" >C hangs outside the strap, in the air.</text>
+<text x="730.0" y="30.0" class="eyebrow" text-anchor="start" >SENSORS → J1</text>
+<rect x="730.0" y="52.0" width="92.0" height="64.0" rx="6" class="box"/>
+<text x="776.0" y="88.0" class="tb" text-anchor="middle" >Pulse</text>
+<line x1="822.0" y1="68.0" x2="880.0" y2="68.0" class="sym w-3v3"/>
+<circle cx="880.0" cy="68.0" r="3" class="jn"/>
+<text x="828.0" y="65.0" class="pin" text-anchor="start" >+</text>
+<text x="888.0" y="72.0" class="tl" text-anchor="start" >3V3</text>
+<line x1="822.0" y1="84.0" x2="880.0" y2="84.0" class="sym w-gnd"/>
+<circle cx="880.0" cy="84.0" r="3" class="jn"/>
+<text x="828.0" y="81.0" class="pin" text-anchor="start" >−</text>
+<text x="888.0" y="88.0" class="tl" text-anchor="start" >GND</text>
+<line x1="822.0" y1="100.0" x2="880.0" y2="100.0" class="sym w-ppga"/>
+<circle cx="880.0" cy="100.0" r="3" class="jn"/>
+<text x="828.0" y="97.0" class="pin" text-anchor="start" >S</text>
+<text x="888.0" y="104.0" class="tl" text-anchor="start" >GPIO4  J1-4</text>
+<rect x="730.0" y="126.0" width="92.0" height="48.0" rx="6" class="box"/>
+<text x="776.0" y="154.0" class="tb" text-anchor="middle" >Ambient C</text>
+<line x1="822.0" y1="142.0" x2="880.0" y2="142.0" class="sym w-ntcc"/>
+<circle cx="880.0" cy="142.0" r="3" class="jn"/>
+<text x="828.0" y="139.0" class="pin" text-anchor="start" >leg</text>
+<text x="888.0" y="146.0" class="tl" text-anchor="start" >node C → GPIO5</text>
+<line x1="822.0" y1="158.0" x2="880.0" y2="158.0" class="sym w-gnd"/>
+<circle cx="880.0" cy="158.0" r="3" class="jn"/>
+<text x="828.0" y="155.0" class="pin" text-anchor="start" >leg</text>
+<text x="888.0" y="162.0" class="tl" text-anchor="start" >GND</text>
+<rect x="730.0" y="184.0" width="92.0" height="80.0" rx="6" class="box"/>
+<text x="776.0" y="228.0" class="tb" text-anchor="middle" >IMU GY-521</text>
+<line x1="822.0" y1="200.0" x2="880.0" y2="200.0" class="sym w-3v3"/>
+<circle cx="880.0" cy="200.0" r="3" class="jn"/>
+<text x="828.0" y="197.0" class="pin" text-anchor="start" >VCC</text>
+<text x="888.0" y="204.0" class="tl" text-anchor="start" >3V3</text>
+<line x1="822.0" y1="216.0" x2="880.0" y2="216.0" class="sym w-gnd"/>
+<circle cx="880.0" cy="216.0" r="3" class="jn"/>
+<text x="828.0" y="213.0" class="pin" text-anchor="start" >GND</text>
+<text x="888.0" y="220.0" class="tl" text-anchor="start" >GND</text>
+<line x1="822.0" y1="232.0" x2="880.0" y2="232.0" class="sym w-scl"/>
+<circle cx="880.0" cy="232.0" r="3" class="jn"/>
+<text x="828.0" y="229.0" class="pin" text-anchor="start" >SCL</text>
+<text x="888.0" y="236.0" class="tl" text-anchor="start" >GPIO18 J1-11</text>
+<line x1="822.0" y1="248.0" x2="880.0" y2="248.0" class="sym w-sda"/>
+<circle cx="880.0" cy="248.0" r="3" class="jn"/>
+<text x="828.0" y="245.0" class="pin" text-anchor="start" >SDA</text>
+<text x="888.0" y="252.0" class="tl" text-anchor="start" >GPIO17 J1-10</text>
+<text x="730.0" y="394.0" class="ts" text-anchor="start" >IMU XDA · XCL · AD0 · INT: unconnected.</text>
+</svg>
+
+<h2>Protoboard layout (top view)</h2><svg class="dg" viewBox="0 0 1010 810" role="img" aria-label="Top view of the protoboard in the case at 10 px per mm: DevKitC on the vent side with its USB end at the notch, IMU and parts on the strip by the cable slot, rails along the outer two rows." xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahead"/></marker></defs>
+<rect x="100.0" y="70.0" width="810" height="690" rx="60" class="case"/>
+<rect x="125.0" y="95.0" width="760" height="640" rx="30" class="cavity"/>
+<rect x="415.0" y="68.0" width="180" height="29" class="gap"/>
+<text x="505.0" y="60.0" class="tl" text-anchor="middle" >cable slot (worn: UP)</text>
+<rect x="406.0" y="734.0" width="18" height="27" class="gap"/>
+<rect x="451.0" y="734.0" width="18" height="27" class="gap"/>
+<rect x="496.0" y="734.0" width="18" height="27" class="gap"/>
+<rect x="541.0" y="734.0" width="18" height="27" class="gap"/>
+<rect x="586.0" y="734.0" width="18" height="27" class="gap"/>
+<text x="505.0" y="725.0" class="tl" text-anchor="middle" >vents (worn: DOWN)</text>
+<rect x="98.0" y="396.59999999999997" width="29" height="240" class="gap"/>
+<text x="88.0" y="516.6" class="tl" text-anchor="middle" transform="rotate(-90 88.0 516.6)">USB notch</text>
+<circle cx="285.0" cy="720.0" r="35" class="boss"/>
+<circle cx="285.0" cy="720.0" r="13" class="hole"/>
+<circle cx="285.0" cy="110.0" r="35" class="boss"/>
+<circle cx="285.0" cy="110.0" r="13" class="hole"/>
+<circle cx="725.0" cy="720.0" r="35" class="boss"/>
+<circle cx="725.0" cy="720.0" r="13" class="hole"/>
+<circle cx="725.0" cy="110.0" r="35" class="boss"/>
+<circle cx="725.0" cy="110.0" r="13" class="hole"/>
+<circle cx="155.0" cy="415.0" r="20" class="window" stroke-dasharray="4 3"/>
+<text x="155.0" y="419.0" class="tb" text-anchor="middle" >B</text>
+<circle cx="855.0" cy="415.0" r="20" class="window" stroke-dasharray="4 3"/>
+<text x="855.0" y="419.0" class="tb" text-anchor="middle" >A</text>
+<rect x="140.0" y="165.0" width="700" height="500" rx="4" class="pcb"/>
+<circle cx="197.9" cy="630.9" r="2.6" class="pad"/>
+<circle cx="197.9" cy="605.5" r="2.6" class="pad"/>
+<circle cx="197.9" cy="580.1" r="2.6" class="pad"/>
+<circle cx="197.9" cy="554.7" r="2.6" class="pad"/>
+<circle cx="197.9" cy="529.3" r="2.6" class="pad"/>
+<circle cx="197.9" cy="503.9" r="2.6" class="pad"/>
+<circle cx="197.9" cy="478.5" r="2.6" class="pad"/>
+<circle cx="197.9" cy="453.1" r="2.6" class="pad"/>
+<circle cx="197.9" cy="427.7" r="2.6" class="pad"/>
+<circle cx="197.9" cy="402.3" r="2.6" class="pad"/>
+<circle cx="197.9" cy="376.9" r="2.6" class="pad"/>
+<circle cx="197.9" cy="351.5" r="2.6" class="pad"/>
+<circle cx="197.9" cy="326.1" r="2.6" class="pad"/>
+<circle cx="197.9" cy="300.7" r="2.6" class="pad"/>
+<circle cx="197.9" cy="275.3" r="2.6" class="pad"/>
+<circle cx="197.9" cy="249.9" r="2.6" class="pad"/>
+<circle cx="197.9" cy="224.5" r="2.6" class="pad"/>
+<circle cx="197.9" cy="199.1" r="2.6" class="pad"/>
+<circle cx="223.3" cy="630.9" r="2.6" class="pad"/>
+<circle cx="223.3" cy="605.5" r="2.6" class="pad"/>
+<circle cx="223.3" cy="580.1" r="2.6" class="pad"/>
+<circle cx="223.3" cy="554.7" r="2.6" class="pad"/>
+<circle cx="223.3" cy="529.3" r="2.6" class="pad"/>
+<circle cx="223.3" cy="503.9" r="2.6" class="pad"/>
+<circle cx="223.3" cy="478.5" r="2.6" class="pad"/>
+<circle cx="223.3" cy="453.1" r="2.6" class="pad"/>
+<circle cx="223.3" cy="427.7" r="2.6" class="pad"/>
+<circle cx="223.3" cy="402.3" r="2.6" class="pad"/>
+<circle cx="223.3" cy="376.9" r="2.6" class="pad"/>
+<circle cx="223.3" cy="351.5" r="2.6" class="pad"/>
+<circle cx="223.3" cy="326.1" r="2.6" class="pad"/>
+<circle cx="223.3" cy="300.7" r="2.6" class="pad"/>
+<circle cx="223.3" cy="275.3" r="2.6" class="pad"/>
+<circle cx="223.3" cy="249.9" r="2.6" class="pad"/>
+<circle cx="223.3" cy="224.5" r="2.6" class="pad"/>
+<circle cx="223.3" cy="199.1" r="2.6" class="pad"/>
+<circle cx="248.7" cy="630.9" r="2.6" class="pad"/>
+<circle cx="248.7" cy="605.5" r="2.6" class="pad"/>
+<circle cx="248.7" cy="580.1" r="2.6" class="pad"/>
+<circle cx="248.7" cy="554.7" r="2.6" class="pad"/>
+<circle cx="248.7" cy="529.3" r="2.6" class="pad"/>
+<circle cx="248.7" cy="503.9" r="2.6" class="pad"/>
+<circle cx="248.7" cy="478.5" r="2.6" class="pad"/>
+<circle cx="248.7" cy="453.1" r="2.6" class="pad"/>
+<circle cx="248.7" cy="427.7" r="2.6" class="pad"/>
+<circle cx="248.7" cy="402.3" r="2.6" class="pad"/>
+<circle cx="248.7" cy="376.9" r="2.6" class="pad"/>
+<circle cx="248.7" cy="351.5" r="2.6" class="pad"/>
+<circle cx="248.7" cy="326.1" r="2.6" class="pad"/>
+<circle cx="248.7" cy="300.7" r="2.6" class="pad"/>
+<circle cx="248.7" cy="275.3" r="2.6" class="pad"/>
+<circle cx="248.7" cy="249.9" r="2.6" class="pad"/>
+<circle cx="248.7" cy="224.5" r="2.6" class="pad"/>
+<circle cx="248.7" cy="199.1" r="2.6" class="pad"/>
+<circle cx="274.1" cy="630.9" r="2.6" class="pad"/>
+<circle cx="274.1" cy="605.5" r="2.6" class="pad"/>
+<circle cx="274.1" cy="580.1" r="2.6" class="pad"/>
+<circle cx="274.1" cy="554.7" r="2.6" class="pad"/>
+<circle cx="274.1" cy="529.3" r="2.6" class="pad"/>
+<circle cx="274.1" cy="503.9" r="2.6" class="pad"/>
+<circle cx="274.1" cy="478.5" r="2.6" class="pad"/>
+<circle cx="274.1" cy="453.1" r="2.6" class="pad"/>
+<circle cx="274.1" cy="427.7" r="2.6" class="pad"/>
+<circle cx="274.1" cy="402.3" r="2.6" class="pad"/>
+<circle cx="274.1" cy="376.9" r="2.6" class="pad"/>
+<circle cx="274.1" cy="351.5" r="2.6" class="pad"/>
+<circle cx="274.1" cy="326.1" r="2.6" class="pad"/>
+<circle cx="274.1" cy="300.7" r="2.6" class="pad"/>
+<circle cx="274.1" cy="275.3" r="2.6" class="pad"/>
+<circle cx="274.1" cy="249.9" r="2.6" class="pad"/>
+<circle cx="274.1" cy="224.5" r="2.6" class="pad"/>
+<circle cx="274.1" cy="199.1" r="2.6" class="pad"/>
+<circle cx="299.5" cy="630.9" r="2.6" class="pad"/>
+<circle cx="299.5" cy="605.5" r="2.6" class="pad"/>
+<circle cx="299.5" cy="580.1" r="2.6" class="pad"/>
+<circle cx="299.5" cy="554.7" r="2.6" class="pad"/>
+<circle cx="299.5" cy="529.3" r="2.6" class="pad"/>
+<circle cx="299.5" cy="503.9" r="2.6" class="pad"/>
+<circle cx="299.5" cy="478.5" r="2.6" class="pad"/>
+<circle cx="299.5" cy="453.1" r="2.6" class="pad"/>
+<circle cx="299.5" cy="427.7" r="2.6" class="pad"/>
+<circle cx="299.5" cy="402.3" r="2.6" class="pad"/>
+<circle cx="299.5" cy="376.9" r="2.6" class="pad"/>
+<circle cx="299.5" cy="351.5" r="2.6" class="pad"/>
+<circle cx="299.5" cy="326.1" r="2.6" class="pad"/>
+<circle cx="299.5" cy="300.7" r="2.6" class="pad"/>
+<circle cx="299.5" cy="275.3" r="2.6" class="pad"/>
+<circle cx="299.5" cy="249.9" r="2.6" class="pad"/>
+<circle cx="299.5" cy="224.5" r="2.6" class="pad"/>
+<circle cx="299.5" cy="199.1" r="2.6" class="pad"/>
+<circle cx="324.9" cy="630.9" r="2.6" class="pad"/>
+<circle cx="324.9" cy="605.5" r="2.6" class="pad"/>
+<circle cx="324.9" cy="580.1" r="2.6" class="pad"/>
+<circle cx="324.9" cy="554.7" r="2.6" class="pad"/>
+<circle cx="324.9" cy="529.3" r="2.6" class="pad"/>
+<circle cx="324.9" cy="503.9" r="2.6" class="pad"/>
+<circle cx="324.9" cy="478.5" r="2.6" class="pad"/>
+<circle cx="324.9" cy="453.1" r="2.6" class="pad"/>
+<circle cx="324.9" cy="427.7" r="2.6" class="pad"/>
+<circle cx="324.9" cy="402.3" r="2.6" class="pad"/>
+<circle cx="324.9" cy="376.9" r="2.6" class="pad"/>
+<circle cx="324.9" cy="351.5" r="2.6" class="pad"/>
+<circle cx="324.9" cy="326.1" r="2.6" class="pad"/>
+<circle cx="324.9" cy="300.7" r="2.6" class="pad"/>
+<circle cx="324.9" cy="275.3" r="2.6" class="pad"/>
+<circle cx="324.9" cy="249.9" r="2.6" class="pad"/>
+<circle cx="324.9" cy="224.5" r="2.6" class="pad"/>
+<circle cx="324.9" cy="199.1" r="2.6" class="pad"/>
+<circle cx="350.3" cy="630.9" r="2.6" class="pad"/>
+<circle cx="350.3" cy="605.5" r="2.6" class="pad"/>
+<circle cx="350.3" cy="580.1" r="2.6" class="pad"/>
+<circle cx="350.3" cy="554.7" r="2.6" class="pad"/>
+<circle cx="350.3" cy="529.3" r="2.6" class="pad"/>
+<circle cx="350.3" cy="503.9" r="2.6" class="pad"/>
+<circle cx="350.3" cy="478.5" r="2.6" class="pad"/>
+<circle cx="350.3" cy="453.1" r="2.6" class="pad"/>
+<circle cx="350.3" cy="427.7" r="2.6" class="pad"/>
+<circle cx="350.3" cy="402.3" r="2.6" class="pad"/>
+<circle cx="350.3" cy="376.9" r="2.6" class="pad"/>
+<circle cx="350.3" cy="351.5" r="2.6" class="pad"/>
+<circle cx="350.3" cy="326.1" r="2.6" class="pad"/>
+<circle cx="350.3" cy="300.7" r="2.6" class="pad"/>
+<circle cx="350.3" cy="275.3" r="2.6" class="pad"/>
+<circle cx="350.3" cy="249.9" r="2.6" class="pad"/>
+<circle cx="350.3" cy="224.5" r="2.6" class="pad"/>
+<circle cx="350.3" cy="199.1" r="2.6" class="pad"/>
+<circle cx="375.7" cy="630.9" r="2.6" class="pad"/>
+<circle cx="375.7" cy="605.5" r="2.6" class="pad"/>
+<circle cx="375.7" cy="580.1" r="2.6" class="pad"/>
+<circle cx="375.7" cy="554.7" r="2.6" class="pad"/>
+<circle cx="375.7" cy="529.3" r="2.6" class="pad"/>
+<circle cx="375.7" cy="503.9" r="2.6" class="pad"/>
+<circle cx="375.7" cy="478.5" r="2.6" class="pad"/>
+<circle cx="375.7" cy="453.1" r="2.6" class="pad"/>
+<circle cx="375.7" cy="427.7" r="2.6" class="pad"/>
+<circle cx="375.7" cy="402.3" r="2.6" class="pad"/>
+<circle cx="375.7" cy="376.9" r="2.6" class="pad"/>
+<circle cx="375.7" cy="351.5" r="2.6" class="pad"/>
+<circle cx="375.7" cy="326.1" r="2.6" class="pad"/>
+<circle cx="375.7" cy="300.7" r="2.6" class="pad"/>
+<circle cx="375.7" cy="275.3" r="2.6" class="pad"/>
+<circle cx="375.7" cy="249.9" r="2.6" class="pad"/>
+<circle cx="375.7" cy="224.5" r="2.6" class="pad"/>
+<circle cx="375.7" cy="199.1" r="2.6" class="pad"/>
+<circle cx="401.1" cy="630.9" r="2.6" class="pad"/>
+<circle cx="401.1" cy="605.5" r="2.6" class="pad"/>
+<circle cx="401.1" cy="580.1" r="2.6" class="pad"/>
+<circle cx="401.1" cy="554.7" r="2.6" class="pad"/>
+<circle cx="401.1" cy="529.3" r="2.6" class="pad"/>
+<circle cx="401.1" cy="503.9" r="2.6" class="pad"/>
+<circle cx="401.1" cy="478.5" r="2.6" class="pad"/>
+<circle cx="401.1" cy="453.1" r="2.6" class="pad"/>
+<circle cx="401.1" cy="427.7" r="2.6" class="pad"/>
+<circle cx="401.1" cy="402.3" r="2.6" class="pad"/>
+<circle cx="401.1" cy="376.9" r="2.6" class="pad"/>
+<circle cx="401.1" cy="351.5" r="2.6" class="pad"/>
+<circle cx="401.1" cy="326.1" r="2.6" class="pad"/>
+<circle cx="401.1" cy="300.7" r="2.6" class="pad"/>
+<circle cx="401.1" cy="275.3" r="2.6" class="pad"/>
+<circle cx="401.1" cy="249.9" r="2.6" class="pad"/>
+<circle cx="401.1" cy="224.5" r="2.6" class="pad"/>
+<circle cx="401.1" cy="199.1" r="2.6" class="pad"/>
+<circle cx="426.5" cy="630.9" r="2.6" class="pad"/>
+<circle cx="426.5" cy="605.5" r="2.6" class="pad"/>
+<circle cx="426.5" cy="580.1" r="2.6" class="pad"/>
+<circle cx="426.5" cy="554.7" r="2.6" class="pad"/>
+<circle cx="426.5" cy="529.3" r="2.6" class="pad"/>
+<circle cx="426.5" cy="503.9" r="2.6" class="pad"/>
+<circle cx="426.5" cy="478.5" r="2.6" class="pad"/>
+<circle cx="426.5" cy="453.1" r="2.6" class="pad"/>
+<circle cx="426.5" cy="427.7" r="2.6" class="pad"/>
+<circle cx="426.5" cy="402.3" r="2.6" class="pad"/>
+<circle cx="426.5" cy="376.9" r="2.6" class="pad"/>
+<circle cx="426.5" cy="351.5" r="2.6" class="pad"/>
+<circle cx="426.5" cy="326.1" r="2.6" class="pad"/>
+<circle cx="426.5" cy="300.7" r="2.6" class="pad"/>
+<circle cx="426.5" cy="275.3" r="2.6" class="pad"/>
+<circle cx="426.5" cy="249.9" r="2.6" class="pad"/>
+<circle cx="426.5" cy="224.5" r="2.6" class="pad"/>
+<circle cx="426.5" cy="199.1" r="2.6" class="pad"/>
+<circle cx="451.9" cy="630.9" r="2.6" class="pad"/>
+<circle cx="451.9" cy="605.5" r="2.6" class="pad"/>
+<circle cx="451.9" cy="580.1" r="2.6" class="pad"/>
+<circle cx="451.9" cy="554.7" r="2.6" class="pad"/>
+<circle cx="451.9" cy="529.3" r="2.6" class="pad"/>
+<circle cx="451.9" cy="503.9" r="2.6" class="pad"/>
+<circle cx="451.9" cy="478.5" r="2.6" class="pad"/>
+<circle cx="451.9" cy="453.1" r="2.6" class="pad"/>
+<circle cx="451.9" cy="427.7" r="2.6" class="pad"/>
+<circle cx="451.9" cy="402.3" r="2.6" class="pad"/>
+<circle cx="451.9" cy="376.9" r="2.6" class="pad"/>
+<circle cx="451.9" cy="351.5" r="2.6" class="pad"/>
+<circle cx="451.9" cy="326.1" r="2.6" class="pad"/>
+<circle cx="451.9" cy="300.7" r="2.6" class="pad"/>
+<circle cx="451.9" cy="275.3" r="2.6" class="pad"/>
+<circle cx="451.9" cy="249.9" r="2.6" class="pad"/>
+<circle cx="451.9" cy="224.5" r="2.6" class="pad"/>
+<circle cx="451.9" cy="199.1" r="2.6" class="pad"/>
+<circle cx="477.3" cy="630.9" r="2.6" class="pad"/>
+<circle cx="477.3" cy="605.5" r="2.6" class="pad"/>
+<circle cx="477.3" cy="580.1" r="2.6" class="pad"/>
+<circle cx="477.3" cy="554.7" r="2.6" class="pad"/>
+<circle cx="477.3" cy="529.3" r="2.6" class="pad"/>
+<circle cx="477.3" cy="503.9" r="2.6" class="pad"/>
+<circle cx="477.3" cy="478.5" r="2.6" class="pad"/>
+<circle cx="477.3" cy="453.1" r="2.6" class="pad"/>
+<circle cx="477.3" cy="427.7" r="2.6" class="pad"/>
+<circle cx="477.3" cy="402.3" r="2.6" class="pad"/>
+<circle cx="477.3" cy="376.9" r="2.6" class="pad"/>
+<circle cx="477.3" cy="351.5" r="2.6" class="pad"/>
+<circle cx="477.3" cy="326.1" r="2.6" class="pad"/>
+<circle cx="477.3" cy="300.7" r="2.6" class="pad"/>
+<circle cx="477.3" cy="275.3" r="2.6" class="pad"/>
+<circle cx="477.3" cy="249.9" r="2.6" class="pad"/>
+<circle cx="477.3" cy="224.5" r="2.6" class="pad"/>
+<circle cx="477.3" cy="199.1" r="2.6" class="pad"/>
+<circle cx="502.7" cy="630.9" r="2.6" class="pad"/>
+<circle cx="502.7" cy="605.5" r="2.6" class="pad"/>
+<circle cx="502.7" cy="580.1" r="2.6" class="pad"/>
+<circle cx="502.7" cy="554.7" r="2.6" class="pad"/>
+<circle cx="502.7" cy="529.3" r="2.6" class="pad"/>
+<circle cx="502.7" cy="503.9" r="2.6" class="pad"/>
+<circle cx="502.7" cy="478.5" r="2.6" class="pad"/>
+<circle cx="502.7" cy="453.1" r="2.6" class="pad"/>
+<circle cx="502.7" cy="427.7" r="2.6" class="pad"/>
+<circle cx="502.7" cy="402.3" r="2.6" class="pad"/>
+<circle cx="502.7" cy="376.9" r="2.6" class="pad"/>
+<circle cx="502.7" cy="351.5" r="2.6" class="pad"/>
+<circle cx="502.7" cy="326.1" r="2.6" class="pad"/>
+<circle cx="502.7" cy="300.7" r="2.6" class="pad"/>
+<circle cx="502.7" cy="275.3" r="2.6" class="pad"/>
+<circle cx="502.7" cy="249.9" r="2.6" class="pad"/>
+<circle cx="502.7" cy="224.5" r="2.6" class="pad"/>
+<circle cx="502.7" cy="199.1" r="2.6" class="pad"/>
+<circle cx="528.1" cy="630.9" r="2.6" class="pad"/>
+<circle cx="528.1" cy="605.5" r="2.6" class="pad"/>
+<circle cx="528.1" cy="580.1" r="2.6" class="pad"/>
+<circle cx="528.1" cy="554.7" r="2.6" class="pad"/>
+<circle cx="528.1" cy="529.3" r="2.6" class="pad"/>
+<circle cx="528.1" cy="503.9" r="2.6" class="pad"/>
+<circle cx="528.1" cy="478.5" r="2.6" class="pad"/>
+<circle cx="528.1" cy="453.1" r="2.6" class="pad"/>
+<circle cx="528.1" cy="427.7" r="2.6" class="pad"/>
+<circle cx="528.1" cy="402.3" r="2.6" class="pad"/>
+<circle cx="528.1" cy="376.9" r="2.6" class="pad"/>
+<circle cx="528.1" cy="351.5" r="2.6" class="pad"/>
+<circle cx="528.1" cy="326.1" r="2.6" class="pad"/>
+<circle cx="528.1" cy="300.7" r="2.6" class="pad"/>
+<circle cx="528.1" cy="275.3" r="2.6" class="pad"/>
+<circle cx="528.1" cy="249.9" r="2.6" class="pad"/>
+<circle cx="528.1" cy="224.5" r="2.6" class="pad"/>
+<circle cx="528.1" cy="199.1" r="2.6" class="pad"/>
+<circle cx="553.5" cy="630.9" r="2.6" class="pad"/>
+<circle cx="553.5" cy="605.5" r="2.6" class="pad"/>
+<circle cx="553.5" cy="580.1" r="2.6" class="pad"/>
+<circle cx="553.5" cy="554.7" r="2.6" class="pad"/>
+<circle cx="553.5" cy="529.3" r="2.6" class="pad"/>
+<circle cx="553.5" cy="503.9" r="2.6" class="pad"/>
+<circle cx="553.5" cy="478.5" r="2.6" class="pad"/>
+<circle cx="553.5" cy="453.1" r="2.6" class="pad"/>
+<circle cx="553.5" cy="427.7" r="2.6" class="pad"/>
+<circle cx="553.5" cy="402.3" r="2.6" class="pad"/>
+<circle cx="553.5" cy="376.9" r="2.6" class="pad"/>
+<circle cx="553.5" cy="351.5" r="2.6" class="pad"/>
+<circle cx="553.5" cy="326.1" r="2.6" class="pad"/>
+<circle cx="553.5" cy="300.7" r="2.6" class="pad"/>
+<circle cx="553.5" cy="275.3" r="2.6" class="pad"/>
+<circle cx="553.5" cy="249.9" r="2.6" class="pad"/>
+<circle cx="553.5" cy="224.5" r="2.6" class="pad"/>
+<circle cx="553.5" cy="199.1" r="2.6" class="pad"/>
+<circle cx="578.9" cy="630.9" r="2.6" class="pad"/>
+<circle cx="578.9" cy="605.5" r="2.6" class="pad"/>
+<circle cx="578.9" cy="580.1" r="2.6" class="pad"/>
+<circle cx="578.9" cy="554.7" r="2.6" class="pad"/>
+<circle cx="578.9" cy="529.3" r="2.6" class="pad"/>
+<circle cx="578.9" cy="503.9" r="2.6" class="pad"/>
+<circle cx="578.9" cy="478.5" r="2.6" class="pad"/>
+<circle cx="578.9" cy="453.1" r="2.6" class="pad"/>
+<circle cx="578.9" cy="427.7" r="2.6" class="pad"/>
+<circle cx="578.9" cy="402.3" r="2.6" class="pad"/>
+<circle cx="578.9" cy="376.9" r="2.6" class="pad"/>
+<circle cx="578.9" cy="351.5" r="2.6" class="pad"/>
+<circle cx="578.9" cy="326.1" r="2.6" class="pad"/>
+<circle cx="578.9" cy="300.7" r="2.6" class="pad"/>
+<circle cx="578.9" cy="275.3" r="2.6" class="pad"/>
+<circle cx="578.9" cy="249.9" r="2.6" class="pad"/>
+<circle cx="578.9" cy="224.5" r="2.6" class="pad"/>
+<circle cx="578.9" cy="199.1" r="2.6" class="pad"/>
+<circle cx="604.3" cy="630.9" r="2.6" class="pad"/>
+<circle cx="604.3" cy="605.5" r="2.6" class="pad"/>
+<circle cx="604.3" cy="580.1" r="2.6" class="pad"/>
+<circle cx="604.3" cy="554.7" r="2.6" class="pad"/>
+<circle cx="604.3" cy="529.3" r="2.6" class="pad"/>
+<circle cx="604.3" cy="503.9" r="2.6" class="pad"/>
+<circle cx="604.3" cy="478.5" r="2.6" class="pad"/>
+<circle cx="604.3" cy="453.1" r="2.6" class="pad"/>
+<circle cx="604.3" cy="427.7" r="2.6" class="pad"/>
+<circle cx="604.3" cy="402.3" r="2.6" class="pad"/>
+<circle cx="604.3" cy="376.9" r="2.6" class="pad"/>
+<circle cx="604.3" cy="351.5" r="2.6" class="pad"/>
+<circle cx="604.3" cy="326.1" r="2.6" class="pad"/>
+<circle cx="604.3" cy="300.7" r="2.6" class="pad"/>
+<circle cx="604.3" cy="275.3" r="2.6" class="pad"/>
+<circle cx="604.3" cy="249.9" r="2.6" class="pad"/>
+<circle cx="604.3" cy="224.5" r="2.6" class="pad"/>
+<circle cx="604.3" cy="199.1" r="2.6" class="pad"/>
+<circle cx="629.7" cy="630.9" r="2.6" class="pad"/>
+<circle cx="629.7" cy="605.5" r="2.6" class="pad"/>
+<circle cx="629.7" cy="580.1" r="2.6" class="pad"/>
+<circle cx="629.7" cy="554.7" r="2.6" class="pad"/>
+<circle cx="629.7" cy="529.3" r="2.6" class="pad"/>
+<circle cx="629.7" cy="503.9" r="2.6" class="pad"/>
+<circle cx="629.7" cy="478.5" r="2.6" class="pad"/>
+<circle cx="629.7" cy="453.1" r="2.6" class="pad"/>
+<circle cx="629.7" cy="427.7" r="2.6" class="pad"/>
+<circle cx="629.7" cy="402.3" r="2.6" class="pad"/>
+<circle cx="629.7" cy="376.9" r="2.6" class="pad"/>
+<circle cx="629.7" cy="351.5" r="2.6" class="pad"/>
+<circle cx="629.7" cy="326.1" r="2.6" class="pad"/>
+<circle cx="629.7" cy="300.7" r="2.6" class="pad"/>
+<circle cx="629.7" cy="275.3" r="2.6" class="pad"/>
+<circle cx="629.7" cy="249.9" r="2.6" class="pad"/>
+<circle cx="629.7" cy="224.5" r="2.6" class="pad"/>
+<circle cx="629.7" cy="199.1" r="2.6" class="pad"/>
+<circle cx="655.1" cy="630.9" r="2.6" class="pad"/>
+<circle cx="655.1" cy="605.5" r="2.6" class="pad"/>
+<circle cx="655.1" cy="580.1" r="2.6" class="pad"/>
+<circle cx="655.1" cy="554.7" r="2.6" class="pad"/>
+<circle cx="655.1" cy="529.3" r="2.6" class="pad"/>
+<circle cx="655.1" cy="503.9" r="2.6" class="pad"/>
+<circle cx="655.1" cy="478.5" r="2.6" class="pad"/>
+<circle cx="655.1" cy="453.1" r="2.6" class="pad"/>
+<circle cx="655.1" cy="427.7" r="2.6" class="pad"/>
+<circle cx="655.1" cy="402.3" r="2.6" class="pad"/>
+<circle cx="655.1" cy="376.9" r="2.6" class="pad"/>
+<circle cx="655.1" cy="351.5" r="2.6" class="pad"/>
+<circle cx="655.1" cy="326.1" r="2.6" class="pad"/>
+<circle cx="655.1" cy="300.7" r="2.6" class="pad"/>
+<circle cx="655.1" cy="275.3" r="2.6" class="pad"/>
+<circle cx="655.1" cy="249.9" r="2.6" class="pad"/>
+<circle cx="655.1" cy="224.5" r="2.6" class="pad"/>
+<circle cx="655.1" cy="199.1" r="2.6" class="pad"/>
+<circle cx="680.5" cy="630.9" r="2.6" class="pad"/>
+<circle cx="680.5" cy="605.5" r="2.6" class="pad"/>
+<circle cx="680.5" cy="580.1" r="2.6" class="pad"/>
+<circle cx="680.5" cy="554.7" r="2.6" class="pad"/>
+<circle cx="680.5" cy="529.3" r="2.6" class="pad"/>
+<circle cx="680.5" cy="503.9" r="2.6" class="pad"/>
+<circle cx="680.5" cy="478.5" r="2.6" class="pad"/>
+<circle cx="680.5" cy="453.1" r="2.6" class="pad"/>
+<circle cx="680.5" cy="427.7" r="2.6" class="pad"/>
+<circle cx="680.5" cy="402.3" r="2.6" class="pad"/>
+<circle cx="680.5" cy="376.9" r="2.6" class="pad"/>
+<circle cx="680.5" cy="351.5" r="2.6" class="pad"/>
+<circle cx="680.5" cy="326.1" r="2.6" class="pad"/>
+<circle cx="680.5" cy="300.7" r="2.6" class="pad"/>
+<circle cx="680.5" cy="275.3" r="2.6" class="pad"/>
+<circle cx="680.5" cy="249.9" r="2.6" class="pad"/>
+<circle cx="680.5" cy="224.5" r="2.6" class="pad"/>
+<circle cx="680.5" cy="199.1" r="2.6" class="pad"/>
+<circle cx="705.9" cy="630.9" r="2.6" class="pad"/>
+<circle cx="705.9" cy="605.5" r="2.6" class="pad"/>
+<circle cx="705.9" cy="580.1" r="2.6" class="pad"/>
+<circle cx="705.9" cy="554.7" r="2.6" class="pad"/>
+<circle cx="705.9" cy="529.3" r="2.6" class="pad"/>
+<circle cx="705.9" cy="503.9" r="2.6" class="pad"/>
+<circle cx="705.9" cy="478.5" r="2.6" class="pad"/>
+<circle cx="705.9" cy="453.1" r="2.6" class="pad"/>
+<circle cx="705.9" cy="427.7" r="2.6" class="pad"/>
+<circle cx="705.9" cy="402.3" r="2.6" class="pad"/>
+<circle cx="705.9" cy="376.9" r="2.6" class="pad"/>
+<circle cx="705.9" cy="351.5" r="2.6" class="pad"/>
+<circle cx="705.9" cy="326.1" r="2.6" class="pad"/>
+<circle cx="705.9" cy="300.7" r="2.6" class="pad"/>
+<circle cx="705.9" cy="275.3" r="2.6" class="pad"/>
+<circle cx="705.9" cy="249.9" r="2.6" class="pad"/>
+<circle cx="705.9" cy="224.5" r="2.6" class="pad"/>
+<circle cx="705.9" cy="199.1" r="2.6" class="pad"/>
+<circle cx="731.3" cy="630.9" r="2.6" class="pad"/>
+<circle cx="731.3" cy="605.5" r="2.6" class="pad"/>
+<circle cx="731.3" cy="580.1" r="2.6" class="pad"/>
+<circle cx="731.3" cy="554.7" r="2.6" class="pad"/>
+<circle cx="731.3" cy="529.3" r="2.6" class="pad"/>
+<circle cx="731.3" cy="503.9" r="2.6" class="pad"/>
+<circle cx="731.3" cy="478.5" r="2.6" class="pad"/>
+<circle cx="731.3" cy="453.1" r="2.6" class="pad"/>
+<circle cx="731.3" cy="427.7" r="2.6" class="pad"/>
+<circle cx="731.3" cy="402.3" r="2.6" class="pad"/>
+<circle cx="731.3" cy="376.9" r="2.6" class="pad"/>
+<circle cx="731.3" cy="351.5" r="2.6" class="pad"/>
+<circle cx="731.3" cy="326.1" r="2.6" class="pad"/>
+<circle cx="731.3" cy="300.7" r="2.6" class="pad"/>
+<circle cx="731.3" cy="275.3" r="2.6" class="pad"/>
+<circle cx="731.3" cy="249.9" r="2.6" class="pad"/>
+<circle cx="731.3" cy="224.5" r="2.6" class="pad"/>
+<circle cx="731.3" cy="199.1" r="2.6" class="pad"/>
+<circle cx="756.7" cy="630.9" r="2.6" class="pad"/>
+<circle cx="756.7" cy="605.5" r="2.6" class="pad"/>
+<circle cx="756.7" cy="580.1" r="2.6" class="pad"/>
+<circle cx="756.7" cy="554.7" r="2.6" class="pad"/>
+<circle cx="756.7" cy="529.3" r="2.6" class="pad"/>
+<circle cx="756.7" cy="503.9" r="2.6" class="pad"/>
+<circle cx="756.7" cy="478.5" r="2.6" class="pad"/>
+<circle cx="756.7" cy="453.1" r="2.6" class="pad"/>
+<circle cx="756.7" cy="427.7" r="2.6" class="pad"/>
+<circle cx="756.7" cy="402.3" r="2.6" class="pad"/>
+<circle cx="756.7" cy="376.9" r="2.6" class="pad"/>
+<circle cx="756.7" cy="351.5" r="2.6" class="pad"/>
+<circle cx="756.7" cy="326.1" r="2.6" class="pad"/>
+<circle cx="756.7" cy="300.7" r="2.6" class="pad"/>
+<circle cx="756.7" cy="275.3" r="2.6" class="pad"/>
+<circle cx="756.7" cy="249.9" r="2.6" class="pad"/>
+<circle cx="756.7" cy="224.5" r="2.6" class="pad"/>
+<circle cx="756.7" cy="199.1" r="2.6" class="pad"/>
+<circle cx="782.1" cy="630.9" r="2.6" class="pad"/>
+<circle cx="782.1" cy="605.5" r="2.6" class="pad"/>
+<circle cx="782.1" cy="580.1" r="2.6" class="pad"/>
+<circle cx="782.1" cy="554.7" r="2.6" class="pad"/>
+<circle cx="782.1" cy="529.3" r="2.6" class="pad"/>
+<circle cx="782.1" cy="503.9" r="2.6" class="pad"/>
+<circle cx="782.1" cy="478.5" r="2.6" class="pad"/>
+<circle cx="782.1" cy="453.1" r="2.6" class="pad"/>
+<circle cx="782.1" cy="427.7" r="2.6" class="pad"/>
+<circle cx="782.1" cy="402.3" r="2.6" class="pad"/>
+<circle cx="782.1" cy="376.9" r="2.6" class="pad"/>
+<circle cx="782.1" cy="351.5" r="2.6" class="pad"/>
+<circle cx="782.1" cy="326.1" r="2.6" class="pad"/>
+<circle cx="782.1" cy="300.7" r="2.6" class="pad"/>
+<circle cx="782.1" cy="275.3" r="2.6" class="pad"/>
+<circle cx="782.1" cy="249.9" r="2.6" class="pad"/>
+<circle cx="782.1" cy="224.5" r="2.6" class="pad"/>
+<circle cx="782.1" cy="199.1" r="2.6" class="pad"/>
+<circle cx="170.0" cy="635.0" r="16" class="mhole"/>
+<circle cx="170.0" cy="195.0" r="16" class="mhole"/>
+<circle cx="810.0" cy="635.0" r="16" class="mhole"/>
+<circle cx="810.0" cy="195.0" r="16" class="mhole"/>
+<text x="192.0" y="175.0" class="ts" text-anchor="start" >M3</text>
+<line x1="528.1" y1="224.5" x2="782.1" y2="224.5" class="rail w-3v3"/>
+<line x1="528.1" y1="199.1" x2="782.1" y2="199.1" class="rail w-gnd"/>
+<text x="800.1" y="228.5" class="tl" text-anchor="start" >3V3</text>
+<text x="800.1" y="203.1" class="tl" text-anchor="start" >GND</text>
+<rect x="150.9" y="389.6" width="627.4" height="254" rx="6" class="devkit"/>
+<rect x="598.0" y="395.0" width="177.0" height="243" rx="3" class="module"/>
+<text x="686.5" y="520.6" class="tw" text-anchor="middle" >WROOM</text>
+<rect x="143.0" y="526.6" width="74" height="90" rx="10" class="usb"/>
+<rect x="143.0" y="416.6" width="74" height="90" rx="10" class="usb"/>
+<text x="235.0" y="520.6" class="tw" text-anchor="middle" >USB-C ×2</text>
+<text x="424.6" y="590.0" class="tw" text-anchor="middle" >ESP32-S3 DevKitC-1  (USB end → the notch)</text>
+<circle cx="731.3" cy="402.3" r="5" class="pinu"/>
+<circle cx="731.3" cy="630.9" r="4" class="pinx"/>
+<text x="731.3" y="424.3" class="tw" text-anchor="middle" >3V3</text>
+<circle cx="705.9" cy="402.3" r="5" class="pinx"/>
+<circle cx="705.9" cy="630.9" r="4" class="pinx"/>
+<circle cx="680.5" cy="402.3" r="5" class="pinx"/>
+<circle cx="680.5" cy="630.9" r="4" class="pinx"/>
+<circle cx="655.1" cy="402.3" r="5" class="pinu"/>
+<circle cx="655.1" cy="630.9" r="4" class="pinx"/>
+<text x="655.1" y="424.3" class="tw" text-anchor="middle" >4</text>
+<circle cx="629.7" cy="402.3" r="5" class="pinu"/>
+<circle cx="629.7" cy="630.9" r="4" class="pinx"/>
+<text x="629.7" y="424.3" class="tw" text-anchor="middle" >5</text>
+<circle cx="604.3" cy="402.3" r="5" class="pinu"/>
+<circle cx="604.3" cy="630.9" r="4" class="pinx"/>
+<text x="604.3" y="424.3" class="tw" text-anchor="middle" >6</text>
+<circle cx="578.9" cy="402.3" r="5" class="pinu"/>
+<circle cx="578.9" cy="630.9" r="4" class="pinx"/>
+<text x="578.9" y="424.3" class="tw" text-anchor="middle" >7</text>
+<circle cx="553.5" cy="402.3" r="5" class="pinx"/>
+<circle cx="553.5" cy="630.9" r="4" class="pinx"/>
+<circle cx="528.1" cy="402.3" r="5" class="pinx"/>
+<circle cx="528.1" cy="630.9" r="4" class="pinx"/>
+<circle cx="502.7" cy="402.3" r="5" class="pinu"/>
+<circle cx="502.7" cy="630.9" r="4" class="pinx"/>
+<text x="502.7" y="424.3" class="tw" text-anchor="middle" >17</text>
+<circle cx="477.3" cy="402.3" r="5" class="pinu"/>
+<circle cx="477.3" cy="630.9" r="4" class="pinx"/>
+<text x="477.3" y="424.3" class="tw" text-anchor="middle" >18</text>
+<circle cx="451.9" cy="402.3" r="5" class="pinu"/>
+<circle cx="451.9" cy="630.9" r="4" class="pinx"/>
+<text x="451.9" y="424.3" class="tw" text-anchor="middle" >8</text>
+<circle cx="426.5" cy="402.3" r="5" class="pinx"/>
+<circle cx="426.5" cy="630.9" r="4" class="pinx"/>
+<circle cx="401.1" cy="402.3" r="5" class="pinx"/>
+<circle cx="401.1" cy="630.9" r="4" class="pinx"/>
+<circle cx="375.7" cy="402.3" r="5" class="pinx"/>
+<circle cx="375.7" cy="630.9" r="4" class="pinx"/>
+<circle cx="350.3" cy="402.3" r="5" class="pinx"/>
+<circle cx="350.3" cy="630.9" r="4" class="pinx"/>
+<circle cx="324.9" cy="402.3" r="5" class="pinx"/>
+<circle cx="324.9" cy="630.9" r="4" class="pinx"/>
+<circle cx="299.5" cy="402.3" r="5" class="pinx"/>
+<circle cx="299.5" cy="630.9" r="4" class="pinx"/>
+<circle cx="274.1" cy="402.3" r="5" class="pinx"/>
+<circle cx="274.1" cy="630.9" r="4" class="pinx"/>
+<circle cx="248.7" cy="402.3" r="5" class="pinx"/>
+<circle cx="248.7" cy="630.9" r="4" class="pinx"/>
+<circle cx="223.3" cy="402.3" r="5" class="pinx"/>
+<circle cx="223.3" cy="630.9" r="4" class="pinx"/>
+<circle cx="197.9" cy="402.3" r="5" class="pinu"/>
+<circle cx="197.9" cy="630.9" r="4" class="pinx"/>
+<text x="197.9" y="424.3" class="tw" text-anchor="middle" >G</text>
+<text x="767.3" y="407.3" class="tw" text-anchor="start" >J1</text>
+<text x="767.3" y="635.9" class="tw" text-anchor="start" >J3</text>
+<text x="729.3" y="442.3" class="tw" text-anchor="middle" >pin 1</text>
+<rect x="235.7" y="185.1" width="203" height="156" rx="4" class="imu"/>
+<text x="336.7" y="244.8" class="tb" text-anchor="middle" >IMU GY-521</text>
+<text x="336.7" y="262.8" class="ts" text-anchor="middle" >“ITG/MPU”</text>
+<circle cx="248.7" cy="326.1" r="5" class="pinu"/>
+<text x="248.7" y="314.1" class="pin" text-anchor="middle" >VCC</text>
+<circle cx="274.1" cy="326.1" r="5" class="pinu"/>
+<text x="274.1" y="314.1" class="pin" text-anchor="middle" >GND</text>
+<circle cx="299.5" cy="326.1" r="5" class="pinu"/>
+<text x="299.5" y="314.1" class="pin" text-anchor="middle" >SCL</text>
+<circle cx="324.9" cy="326.1" r="5" class="pinu"/>
+<text x="324.9" y="314.1" class="pin" text-anchor="middle" >SDA</text>
+<circle cx="350.3" cy="326.1" r="5" class="pinx"/>
+<text x="350.3" y="314.1" class="pin" text-anchor="middle" >XDA</text>
+<circle cx="375.7" cy="326.1" r="5" class="pinx"/>
+<text x="375.7" y="314.1" class="pin" text-anchor="middle" >XCL</text>
+<circle cx="401.1" cy="326.1" r="5" class="pinx"/>
+<text x="401.1" y="314.1" class="pin" text-anchor="middle" >AD0</text>
+<circle cx="426.5" cy="326.1" r="5" class="pinx"/>
+<text x="426.5" y="314.1" class="pin" text-anchor="middle" >INT</text>
+<line x1="756.7" y1="224.5" x2="756.7" y2="326.1" class="lead"/>
+<rect x="748.7" y="247.3" width="16" height="56" rx="7" class="res"/>
+<circle cx="756.7" cy="224.5" r="5" class="pinu"/>
+<circle cx="756.7" cy="326.1" r="5" class="pinu"/>
+<text x="768.7" y="279.3" class="ts" text-anchor="start" >R1</text>
+<line x1="680.5" y1="224.5" x2="680.5" y2="326.1" class="lead"/>
+<rect x="672.5" y="247.3" width="16" height="56" rx="7" class="res"/>
+<circle cx="680.5" cy="224.5" r="5" class="pinu"/>
+<circle cx="680.5" cy="326.1" r="5" class="pinu"/>
+<text x="692.5" y="279.3" class="ts" text-anchor="start" >R2</text>
+<line x1="528.1" y1="224.5" x2="528.1" y2="326.1" class="lead"/>
+<rect x="520.1" y="247.3" width="16" height="56" rx="7" class="res"/>
+<circle cx="528.1" cy="224.5" r="5" class="pinu"/>
+<circle cx="528.1" cy="326.1" r="5" class="pinu"/>
+<text x="540.1" y="279.3" class="ts" text-anchor="start" >R3</text>
+<line x1="629.7" y1="300.7" x2="629.7" y2="199.1" class="lead"/>
+<rect x="621.7" y="221.9" width="16" height="56" rx="7" class="res"/>
+<circle cx="629.7" cy="300.7" r="5" class="pinu"/>
+<circle cx="629.7" cy="199.1" r="5" class="pinu"/>
+<text x="641.7" y="253.9" class="ts" text-anchor="start" >R4</text>
+<polyline points="197.9,402.3 197.9,300.7 705.9,300.7 705.9,199.1" class="wire w-gnd" fill="none" stroke-dasharray="5 4"/>
+<polyline points="731.3,402.3 731.3,313.4 782.1,313.4 782.1,224.5" class="wire w-3v3" fill="none" stroke-dasharray="5 4"/>
+<polyline points="629.7,300.7 629.7,364.2 451.9,364.2 451.9,402.3" class="wire w-vsense" fill="none" stroke-dasharray="5 4"/>
+<polyline points="528.1,326.1 528.1,364.2 629.7,364.2 629.7,402.3" class="wire w-ntcc" fill="none" stroke-dasharray="5 4"/>
+<polyline points="680.5,326.1 680.5,364.2 578.9,364.2 578.9,402.3" class="wire w-ntcb" fill="none" stroke-dasharray="5 4"/>
+<polyline points="756.7,326.1 756.7,364.2 604.3,364.2 604.3,402.3" class="wire w-ntca" fill="none" stroke-dasharray="5 4"/>
+<polyline points="248.7,326.1 248.7,275.3 578.9,275.3 578.9,224.5" class="wire w-3v3" fill="none" stroke-dasharray="5 4"/>
+<polyline points="274.1,326.1 274.1,262.6 578.9,262.6 578.9,199.1" class="wire w-gnd" fill="none" stroke-dasharray="5 4"/>
+<polyline points="299.5,326.1 299.5,364.2 477.3,364.2 477.3,402.3" class="wire w-scl" fill="none" stroke-dasharray="5 4"/>
+<polyline points="324.9,326.1 324.9,364.2 502.7,364.2 502.7,402.3" class="wire w-sda" fill="none" stroke-dasharray="5 4"/>
+<polyline points="438.5,70.0 438.5,133.2 553.5,133.2 553.5,224.5" class="wire w-3v3" fill="none"/>
+<polyline points="452.0,70.0 452.0,136.4 553.5,136.4 553.5,199.1" class="wire w-gnd" fill="none"/>
+<polyline points="465.5,70.0 465.5,139.6 660.1,139.6 660.1,366.7 655.1,402.3" class="wire w-ppga" fill="none"/>
+<polyline points="479.0,70.0 479.0,142.8 502.7,142.8 502.7,326.1" class="wire w-ntcc" fill="none"/>
+<line x1="502.7" y1="326.1" x2="528.1" y2="326.1" class="bridge w-ntcc"/>
+<polyline points="492.5,70.0 492.5,146.0 528.1,146.0 528.1,199.1" class="wire w-gnd" fill="none"/>
+<text x="407.0" y="79.0" class="ts" text-anchor="end" >pulse sensor + ambient thermistor leads</text>
+<circle cx="756.7" cy="326.1" r="9" class="deckring w-ntca"/>
+<circle cx="731.3" cy="199.1" r="9" class="deckring w-gnd"/>
+<circle cx="680.5" cy="326.1" r="9" class="deckring w-ntcb"/>
+<circle cx="655.1" cy="199.1" r="9" class="deckring w-gnd"/>
+<line x1="100.0" y1="792.0" x2="134.0" y2="792.0" class="wire w-gnd"/>
+<text x="142.0" y="796.0" class="ts" text-anchor="start" >on top / lead in from the slot</text>
+<line x1="400.0" y1="792.0" x2="434.0" y2="792.0" class="wire w-gnd" stroke-dasharray="6 4"/>
+<text x="442.0" y="796.0" class="ts" text-anchor="start" >insulated wire on the underside</text>
+<circle cx="740.0" cy="792.0" r="9" class="deckring w-gnd"/>
+<text x="756.0" y="796.0" class="ts" text-anchor="start" >wire from under the deck</text>
+</svg>
+
+<h2>Every connection</h2><table class="nl"><thead><tr><th>#</th><th>From</th><th>To</th><th>How</th><th>✓</th></tr></thead><tbody><tr><td class="num">1</td><td><span class="sw w-gnd"></span>J1-22 G</td><td>GND rail</td><td>underside wire</td><td><input type="checkbox" class="chk" id="net1" aria-label="checked J1-22 G"></td></tr>
+<tr><td class="num">2</td><td><span class="sw w-3v3"></span>J1-1 3V3</td><td>3V3 rail</td><td>underside wire</td><td><input type="checkbox" class="chk" id="net2" aria-label="checked J1-1 3V3"></td></tr>
+<tr><td class="num">3</td><td><span class="sw w-vsense"></span>R4 top lead</td><td>J1-12 GPIO8</td><td>underside wire</td><td><input type="checkbox" class="chk" id="net3" aria-label="checked R4 top lead"></td></tr>
+<tr><td class="num">4</td><td><span class="sw w-ntcc"></span>R3 lower lead (node C)</td><td>J1-5 GPIO5</td><td>underside wire</td><td><input type="checkbox" class="chk" id="net4" aria-label="checked R3 lower lead (node C)"></td></tr>
+<tr><td class="num">5</td><td><span class="sw w-ntcb"></span>R2 lower lead (node B)</td><td>J1-7 GPIO7</td><td>underside wire</td><td><input type="checkbox" class="chk" id="net5" aria-label="checked R2 lower lead (node B)"></td></tr>
+<tr><td class="num">6</td><td><span class="sw w-ntca"></span>R1 lower lead (node A)</td><td>J1-6 GPIO6</td><td>underside wire</td><td><input type="checkbox" class="chk" id="net6" aria-label="checked R1 lower lead (node A)"></td></tr>
+<tr><td class="num">7</td><td><span class="sw w-3v3"></span>IMU VCC</td><td>3V3 rail</td><td>underside wire</td><td><input type="checkbox" class="chk" id="net7" aria-label="checked IMU VCC"></td></tr>
+<tr><td class="num">8</td><td><span class="sw w-gnd"></span>IMU GND</td><td>GND rail</td><td>underside wire</td><td><input type="checkbox" class="chk" id="net8" aria-label="checked IMU GND"></td></tr>
+<tr><td class="num">9</td><td><span class="sw w-scl"></span>IMU SCL</td><td>J1-11 GPIO18</td><td>underside wire</td><td><input type="checkbox" class="chk" id="net9" aria-label="checked IMU SCL"></td></tr>
+<tr><td class="num">10</td><td><span class="sw w-sda"></span>IMU SDA</td><td>J1-10 GPIO17</td><td>underside wire</td><td><input type="checkbox" class="chk" id="net10" aria-label="checked IMU SDA"></td></tr>
+<tr><td class="num">11</td><td><span class="sw w-3v3"></span>Pulse +</td><td>3V3 rail</td><td>lead from the slot</td><td><input type="checkbox" class="chk" id="net11" aria-label="checked Pulse +"></td></tr>
+<tr><td class="num">12</td><td><span class="sw w-gnd"></span>Pulse -</td><td>GND rail</td><td>lead from the slot</td><td><input type="checkbox" class="chk" id="net12" aria-label="checked Pulse -"></td></tr>
+<tr><td class="num">13</td><td><span class="sw w-ppga"></span>Pulse S</td><td>J1-4 GPIO4</td><td>lead from the slot</td><td><input type="checkbox" class="chk" id="net13" aria-label="checked Pulse S"></td></tr>
+<tr><td class="num">14</td><td><span class="sw w-ntcc"></span>Ambient thermistor C, one leg</td><td>Pad beside R3 lower lead</td><td>lead from the slot</td><td><input type="checkbox" class="chk" id="net14" aria-label="checked Ambient thermistor C, one leg"></td></tr>
+<tr><td class="num">15</td><td><span class="sw w-ntcc"></span>Pad beside R3 lower lead</td><td>R3 lower lead (node C)</td><td>solder bridge</td><td><input type="checkbox" class="chk" id="net15" aria-label="checked Pad beside R3 lower lead"></td></tr>
+<tr><td class="num">16</td><td><span class="sw w-gnd"></span>Ambient thermistor C, other leg</td><td>GND rail</td><td>lead from the slot</td><td><input type="checkbox" class="chk" id="net16" aria-label="checked Ambient thermistor C, other leg"></td></tr>
+<tr><td class="num">17</td><td><span class="sw w-ntca"></span>Thermistor A, one leg</td><td>R1 lower lead (node A)</td><td>wire from under the deck</td><td><input type="checkbox" class="chk" id="net17" aria-label="checked Thermistor A, one leg"></td></tr>
+<tr><td class="num">18</td><td><span class="sw w-gnd"></span>Thermistor A, other leg</td><td>GND rail</td><td>wire from under the deck</td><td><input type="checkbox" class="chk" id="net18" aria-label="checked Thermistor A, other leg"></td></tr>
+<tr><td class="num">19</td><td><span class="sw w-ntcb"></span>Thermistor B, one leg</td><td>R2 lower lead (node B)</td><td>wire from under the deck</td><td><input type="checkbox" class="chk" id="net19" aria-label="checked Thermistor B, one leg"></td></tr>
+<tr><td class="num">20</td><td><span class="sw w-gnd"></span>Thermistor B, other leg</td><td>GND rail</td><td>wire from under the deck</td><td><input type="checkbox" class="chk" id="net20" aria-label="checked Thermistor B, other leg"></td></tr></tbody></table>
+<h2>How it's worn</h2><svg class="dg" viewBox="0 0 1100 460" role="img" aria-label="How it is worn: case on the breastbone with the cable slot up, the power bank pod on the strap at the wearer&#x27;s right side with a short cable to the case, the pulse sensor under the strap on one side, the ambient thermistor on the outside of the strap. Inset: a slice at strap height seen from above." xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahead"/></marker></defs>
+<path d="M300,40 C300,70 280,82 250,90 L170,110 C130,120 112,150 110,200 L104,420 L496,420 L490,200 C488,150 470,120 430,110 L350,90 C320,82 300,70 300,40 Z" class="torso"/>
+<path d="M262,40 C262,66 280,80 300,80 C320,80 338,66 338,40" class="neck"/>
+<path d="M180,190 C220,214 270,214 296,196 M304,196 C330,214 380,214 420,190" class="hint"/>
+<path d="M106,262 C170,256 220,256 244,258 L244,284 C220,282 170,282 106,288 Z" class="strap"/>
+<path d="M356,258 C380,256 430,256 494,262 L494,288 C430,282 380,282 356,284 Z" class="strap"/>
+<rect x="240.0" y="258.0" width="22.0" height="26.0" rx="3" class="casefront"/>
+<rect x="338.0" y="258.0" width="22.0" height="26.0" rx="3" class="casefront"/>
+<rect x="259.0" y="243.0" width="82.0" height="56.0" rx="8" class="casefront"/>
+<text x="300.0" y="276.0" class="tb" text-anchor="middle" >Ember</text>
+<rect x="291" y="239" width="18" height="5" class="gap"/>
+<text x="300.0" y="404.0" class="ts" text-anchor="middle" >strap just below the chest muscles</text>
+<rect x="112.0" y="250.0" width="66.0" height="44.0" rx="6" class="pod"/>
+<text x="145.0" y="276.0" class="tb" text-anchor="middle" >bank</text>
+<path d="M178,262 C198,232 232,232 258,254" class="cable"/>
+<text x="145.0" y="316.0" class="tl" text-anchor="middle" >power bank pod</text>
+<text x="145.0" y="332.0" class="ts" text-anchor="middle" >at the side</text>
+<path d="M296,242 C296,214 262,206 254,226 C248,240 234,252 214,266" class="lead2 w-ppga"/>
+<path d="M304,242 C304,222 322,216 330,232 C336,244 386,246 418,252" class="lead2 w-ntcc"/>
+<text x="300.0" y="202.0" class="ts" text-anchor="middle" >drip loop</text>
+<circle cx="214.0" cy="272.0" r="11" class="ppg"/>
+<text x="214.0" y="362.0" class="tl" text-anchor="middle" >pulse sensor</text>
+<text x="214.0" y="378.0" class="ts" text-anchor="middle" >under the strap</text>
+<circle cx="428.0" cy="253.0" r="6" class="sht"/>
+<text x="428.0" y="226.0" class="ts" text-anchor="middle" >ambient thermistor</text>
+<line x1="520.0" y1="266.0" x2="520.0" y2="196.0" class="ln" marker-end="url(#ah)"/>
+<text x="530.0" y="204.0" class="ts" text-anchor="start" >UP: cable slot</text>
+<line x1="520.0" y1="292.0" x2="520.0" y2="362.0" class="ln" marker-end="url(#ah)"/>
+<text x="530.0" y="358.0" class="ts" text-anchor="start" >DOWN: vents</text>
+<text x="300.0" y="318.0" class="ts" text-anchor="middle" >USB end faces the pod</text>
+<text x="660.0" y="40.0" class="eyebrow" text-anchor="start" >SLICE AT STRAP HEIGHT, FROM ABOVE</text>
+<polyline points="954.9,318.2 952.0,305.7 948.6,293.5 944.5,281.5 939.9,270.0 934.7,258.9 929.0,248.2 922.8,238.1 916.1,228.6 908.9,219.6 901.3,211.3 893.3,203.7 885.0,196.8 876.3,190.6 867.4,185.2 858.2,180.6 848.8,176.8 839.3,173.8 829.6,171.7 819.8,170.4 810.0,170.0 800.2,170.4 790.4,171.7 780.7,173.8 771.2,176.8 761.8,180.6 752.6,185.2 743.7,190.6 735.0,196.8 726.7,203.7 718.7,211.3 711.1,219.6 703.9,228.6 697.2,238.1 691.0,248.2 685.3,258.9 680.1,270.0 675.5,281.5 671.4,293.5 668.0,305.7 665.1,318.2" class="skinline" fill="none"/>
+<text x="810.0" y="340.0" class="tl" text-anchor="middle" >body</text>
+<polyline points="1003.0,327.3 1000.2,310.5 996.4,294.0 991.7,277.8 986.2,262.2 979.7,247.0 972.5,232.4 964.5,218.5 955.7,205.4 946.2,193.0 936.0,181.6 925.2,171.0 913.9,161.4 902.0,152.8 889.7,145.3 877.0,138.8 864.0,133.5 850.8,129.4 837.3,126.4 823.7,124.6 810.0,124.0 796.3,124.6 782.7,126.4 769.2,129.4 756.0,133.5 743.0,138.8 730.3,145.3 718.0,152.8 706.1,161.4 694.8,171.0 684.0,181.6 673.8,193.0 664.3,205.4 655.5,218.5 647.5,232.4 640.3,247.0 633.8,262.2 628.3,277.8 623.6,294.0 619.8,310.5 617.0,327.3" class="shirtline" fill="none"/>
+<path d="M764,167 Q810,176 856,167 L856,140 L764,140 Z" class="casefront"/>
+<rect x="752.0" y="161.0" width="12.0" height="7.0" rx="1" class="casefront"/>
+<rect x="856.0" y="161.0" width="12.0" height="7.0" rx="1" class="casefront"/>
+<circle cx="772.0" cy="168.0" r="3.4" class="bead"/>
+<circle cx="848.0" cy="168.0" r="3.4" class="bead"/>
+<polyline points="752.0,164.0 752.3,180.9 747.5,183.5 742.8,186.4 738.2,189.5 733.6,192.9 729.2,196.4 724.8,200.1 720.5,204.0 716.3,208.1 712.3,212.4 708.3,216.8 704.4,221.5 700.7,226.3 697.1,231.2 693.7,236.3 690.3,241.6 687.1,247.0 684.1,252.6 681.1,258.3 678.4,264.1 675.7,270.1 673.3,276.1 671.0,282.3 668.8,288.5 666.8,294.9 665.0,301.3 663.3,307.9 661.8,314.5 660.5,321.1 659.3,327.8 658.3,334.6" class="strapline" fill="none"/>
+<polyline points="868.0,164.0 867.7,180.9 872.5,183.5 877.2,186.4 881.8,189.5 886.4,192.9 890.8,196.4 895.2,200.1 899.5,204.0 903.7,208.1 907.7,212.4 911.7,216.8 915.6,221.5 919.3,226.3 922.9,231.2 926.3,236.3 929.7,241.6 932.9,247.0 935.9,252.6 938.9,258.3 941.6,264.1 944.3,270.1 946.7,276.1 949.0,282.3 951.2,288.5 953.2,294.9 955.0,301.3 956.7,307.9 958.2,314.5 959.5,321.1 960.7,327.8 961.7,334.6" class="strapline" fill="none"/>
+<circle cx="712.9" cy="216.0" r="5.5" class="ppg"/>
+<circle cx="680.8" cy="238.2" r="5" class="sht"/>
+<rect x="936.1" y="264.9" width="48" height="20" rx="4" class="pod" transform="rotate(-110.1 960.1 274.9)"/>
+<text x="942.1" y="318.9" class="ts" text-anchor="start" >power bank pod</text>
+<text x="942.1" y="333.9" class="ts" text-anchor="start" >at the side</text>
+<text x="670.0" y="124.0" class="ts" text-anchor="start" >case on the breastbone: the curved back bridges it</text>
+<text x="810.0" y="262.0" class="ts" text-anchor="middle" >beads touch skin at both end pads</text>
+<text x="810.0" y="292.0" class="ts" text-anchor="middle" >pulse sensor (green ring) sits</text>
+<text x="810.0" y="308.0" class="ts" text-anchor="middle" >between strap and skin</text>
+<text x="668.8" y="228.2" class="ts" text-anchor="end" >ambient therm.</text>
+<text x="668.8" y="243.2" class="ts" text-anchor="end" >under the shirt</text>
+<text x="624.3" y="338.9" class="ts" text-anchor="start" >shirt</text>
+<text x="670.0" y="432.0" class="ts" text-anchor="start" >Each strap end goes up through a loop from the skin side and folds</text>
+<text x="670.0" y="448.0" class="ts" text-anchor="start" >back on itself. The pull stays at skin level, so the case can&#x27;t tip.</text>
+</svg>
+
+</main></body></html>

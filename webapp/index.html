@@ -25,6 +25,7 @@
             <button type="button" id="conn-off"  class="btn btn--secondary btn-sm">Disconnect</button>
             <button type="button" id="conn-usb"  class="btn btn--secondary btn-sm">USB cable (bench)</button>
             <button type="button" id="conn-demo" class="btn btn--secondary btn-sm">Show demo</button>
+            <button type="button" id="conn-replay" class="btn btn--secondary btn-sm">Replay sample</button>
           </div>
         </div>
       </div>
@@ -45,7 +46,7 @@
   import { mount as mountSupervisor } from './src/views/SupervisorView.js';
   import { subscribe }                from './src/lib/datastore.js';
   import {
-    startDemo, connectBluetooth, connectUsb, disconnect, bleAvailable, serialAvailable,
+    startDemo, startReplay, connectBluetooth, connectUsb, disconnect, bleAvailable, serialAvailable,
   } from './src/lib/device.js';
   import { startWeatherWithGeolocation }    from './src/lib/weather.js';
   import { toast }                          from './src/lib/toast.js';
@@ -101,17 +102,20 @@
   const btnOff    = document.getElementById('conn-off');
   const btnUsb    = document.getElementById('conn-usb');
   const btnDemo   = document.getElementById('conn-demo');
+  const btnReplay = document.getElementById('conn-replay');
 
   subscribe(({ source, link }) => {
     const device = source === 'ble' || source === 'serial';
+    const played = source === 'demo' || source === 'replay';
     const up     = link === 'connected';
     const via    = source === 'ble' ? 'Bluetooth' : 'USB';
     connDot.className = 'connection-dot' + (
-      source === 'demo' && up ? ' simulating' :
+      played && up            ? ' simulating' :
       device && up            ? ' connected' :
       device && link !== 'off' ? ' reconnecting' : '');
     connLabel.textContent =
-      source === 'demo' ? (up ? 'Demo' : 'Demo stopped') :
+      source === 'demo'   ? (up ? 'Demo' : 'Demo stopped') :
+      source === 'replay' ? (up ? 'Replay' : 'Replay stopped') :
       !device           ? 'Not connected' :
       link === 'connected'    ? via :
       link === 'connecting'   ? 'Connecting…' :
@@ -120,6 +124,8 @@
     connDesc.textContent =
       source === 'demo' ? (up ? 'Showing a simulated session. Connect EMB.R to go live.'
                               : 'The demo is stopped. Restart it or connect EMB.R.') :
+      source === 'replay' ? (up ? 'Replaying a 1-minute sample session on a loop. Connect EMB.R to go live.'
+                                : 'The replay is stopped. Restart it or connect EMB.R.') :
       !device           ? 'No device connected.' :
       link === 'connected'    ? `EMB.R is connected over ${via}.` :
       link === 'connecting'   ? 'Connecting to EMB.R…' :
@@ -128,11 +134,13 @@
                                 'EMB.R is disconnected.';
     // Connect is offered unless Bluetooth is up or already retrying
     btnBle.hidden  = source === 'ble' && link !== 'off';
-    btnOff.hidden  = !(device && link !== 'off') && !(source === 'demo' && up);
-    btnOff.textContent = source === 'demo' ? 'Stop demo' : 'Disconnect';
+    btnOff.hidden  = !(device && link !== 'off') && !(played && up);
+    btnOff.textContent = source === 'demo' ? 'Stop demo' : source === 'replay' ? 'Stop replay' : 'Disconnect';
     btnUsb.hidden  = device && link !== 'off';
     btnDemo.hidden = source === 'demo' && up;
     btnDemo.textContent = source === 'demo' ? 'Restart demo' : 'Show demo';
+    btnReplay.hidden = source === 'replay' && up;
+    btnReplay.textContent = source === 'replay' ? 'Restart replay' : 'Replay sample';
   });
 
   function setMenu(open) {
@@ -158,6 +166,11 @@
   btnUsb.addEventListener('click',  () => tryConnect(connectUsb, serialAvailable() ? null : 'USB needs Chrome on a laptop.'));
   btnOff.addEventListener('click',  () => { setMenu(false); disconnect(); });
   btnDemo.addEventListener('click', () => { setMenu(false); startDemo(); });
+  btnReplay.addEventListener('click', async () => {
+    setMenu(false);
+    try { await startReplay(); }
+    catch (err) { toast(`Couldn't start the replay: ${err?.message ?? err}`); }
+  });
 
   // ── boot ─────────────────────────────────────────────────────────────
   startWeatherWithGeolocation();

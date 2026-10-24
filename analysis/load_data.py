@@ -109,8 +109,13 @@ def _flatten_columns(cols):
     return flat
 
 
-def load_prospie(path, sheet="Data", verbose=True, hr_types=CHEST_HR_TYPES):
+def load_prospie(path, sheet="Data", verbose=True, hr_types=CHEST_HR_TYPES,
+                 extra_cols=None):
     """Load the PROSPIE workbook into the standard frame.
+
+    extra_cols: optional {new_name: exact flattened column name} to carry
+    through as numeric columns (9999 -> NaN). Used by learned_correction.py;
+    the standard evaluation does not need it.
 
     The PROSPIE Data sheet uses a two-row merged header, so we read it with
     header=[0,1] and then flatten the MultiIndex to plain strings before
@@ -164,6 +169,12 @@ def load_prospie(path, sheet="Data", verbose=True, hr_types=CHEST_HR_TYPES):
     for k in STANDARD_COLS:
         src = mapping.get(k)
         df[k] = raw[src] if src is not None else np.nan
+
+    for name, src in (extra_cols or {}).items():
+        if src not in raw.columns:
+            sys.exit(f"extra column {src!r} not found in {path}")
+        df[name] = pd.to_numeric(raw[src], errors="coerce").replace(
+            [9999, 9999.0], np.nan)
 
     if mapping["subject"] is None:
         sys.exit("no subject column found; leave-one-subject-out needs one")

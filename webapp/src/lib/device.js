@@ -1,5 +1,5 @@
 /**
- * device.js — which source feeds the datastore: the demo, Bluetooth or USB.
+ * device.js — which source feeds the datastore: the demo, a replay, Bluetooth or USB.
  *
  * One source at a time. Switching starts a fresh session in the datastore.
  * The only thing the app ever sends back is a command (BASELINE), routed to
@@ -14,10 +14,11 @@ import { ingestFrame, setSource, setLink } from './datastore.js';
 import { bleAvailable, connectBle, disconnectBle, sendBleCommand } from './ble.js';
 import { serialAvailable, connectSerial, disconnectSerial, sendSerialCommand } from './serial.js';
 import { startSimulation, stopSimulation, simRunning, simCommand } from './sim.js';
+import { loadReplay, playReplay, stopReplay } from './replay.js';
 
 const STALL_MS = 5_000;   // the device sends 1 frame a second: 5 missed in a row
 
-let _active = 'none';     // 'none' | 'demo' | 'ble' | 'serial'
+let _active = 'none';     // 'none' | 'demo' | 'replay' | 'ble' | 'serial'
 let _link   = 'off';      // mirror of the datastore's link state
 let _lastFrameMs = 0;     // wall clock of the last device frame
 let _watchdog = null;
@@ -37,6 +38,7 @@ function _take(source) {
   const prev = _active;
   _active = source;          // first, so the old source's 'off' callback is ignored
   if (prev === 'demo')   stopSimulation();
+  if (prev === 'replay') stopReplay();
   if (prev === 'ble')    disconnectBle();
   if (prev === 'serial') disconnectSerial({ quiet: true });
   setSource(source);
@@ -98,6 +100,21 @@ export function startDemo() {
   startSimulation((f, t) => { if (_active === 'demo') ingestFrame(f, t); });
 }
 
+/**
+ * Replay the sample session (webapp/demo/resting_sample.csv) at 1×, looping.
+ * Pressed again, it restarts as a fresh session. Rejects if the file can't be
+ * loaded; the current source keeps running in that case.
+ */
+export async function startReplay() {
+  const frames = await loadReplay();
+  _fallback = false;
+  _stopWatchdog();
+  if (_active === 'replay') setSource('replay', { fresh: true });
+  else _take('replay');
+  _setLink('connected');
+  playReplay(frames, (f, t) => { if (_active === 'replay') ingestFrame(f, t); });
+}
+
 /** Bluetooth (the worn demo). Call from a click. Rejects on cancel or failure. */
 export function connectBluetooth() {
   return connectBle(_callbacks('ble'));
@@ -114,6 +131,7 @@ export async function disconnect() {
   if (_active === 'ble')    disconnectBle();
   if (_active === 'serial') await disconnectSerial();
   if (_active === 'demo')   { stopSimulation(); _setLink('off'); }
+  if (_active === 'replay') { stopReplay(); _setLink('off'); }
 }
 
 /** Send a command (BASELINE, …) to the active source. */
@@ -121,5 +139,6 @@ export async function sendCommand(text) {
   if (_active === 'ble')    return sendBleCommand(text);
   if (_active === 'serial') return sendSerialCommand(text);
   if (_active === 'demo')   return simCommand(text);
+  if (_active === 'replay') throw new Error('A replay can\'t take commands.');
   throw new Error('EMB.R is not connected.');
 }

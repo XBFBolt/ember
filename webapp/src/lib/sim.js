@@ -9,7 +9,7 @@
  *   no base   ≤2 min  number, no baseline; waits for BASELINE, then starts it itself
  *   baseline  5 min   baseline running (state bit 4)        → "Setting up"
  *   restart   1 min   filter restarted, number withheld     → "Starting"
- *   work              36.8 → 38.7 → 38.0 °C, then holds; one minute on one pulse sensor
+ *   work              36.8 → 38.7 → 38.0 °C, then holds; one minute with the pulse on the step rate
  */
 
 import { encodeFrame, decodeFrame, STATE, FLAG, HRQ } from './frame.js';
@@ -30,7 +30,7 @@ const WORK_HR = [
   114, 118, 122, 125, 127, 129, 130, 131, 132, 132,
   131, 130, 128, 126, 124, 122, 120, 118, 117, 116,
 ];
-const SINGLE_SENSOR_STEPS = [8, 9];   // one minute on one pulse sensor → Low confidence
+const CADENCE_STEPS = [8, 9];   // one minute with the pulse on the step rate → Low confidence
 
 // 36.8 at step 0 → 38.7 at step 20, then cools to 38.0 by step 29 and holds.
 function _workCore(i) {
@@ -100,7 +100,6 @@ function _frame() {
   const hr = resting ? 64 + _jit(3) : WORK_HR[_step] + _jit(3);
   const core = resting ? 36.8 + _jit(0.04) : _workCore(_step) + _jit(0.04);
   const i = resting ? 0 : _step;
-  const evapKpa = Math.max(0.1, 2.8 - i * 0.08 + _jit(0.1));
 
   const f = {
     seq:      _seq++ & 0xffff,
@@ -111,14 +110,11 @@ function _frame() {
     logging:  false,
     flags:    0,
     hr,
-    hrQuality: HRQ.AGREED,
-    hrA:      hr + _jit(2),
-    hrB:      hr + _jit(2),
+    hrQuality: HRQ.OK,
     // Skin sits 1.5–2.0 °C below core and drifts a little further during effort
     skin:     core - (1.5 + Math.min(i * 0.02, 0.5)) + _jit(0.2),
-    microC:   30.0 + i * 0.06 + _jit(0.3),
-    microRh:  Math.min(95, 55 + i * 1.2 + _jit(3)),
-    evapKpa,
+    // Air beside the strap: a warm room, warmed a little by the body during effort
+    airC:     27.0 + i * 0.04 + _jit(0.2),
     battery:  null,                                   // power bank: always "on USB"
     activity: resting ? 0.01 + Math.random() * 0.01 : 0.22 + _jit(0.08),
   };
@@ -137,10 +133,10 @@ function _frame() {
       Object.assign(f, { core: null, half: null, state: STATE.REFUSE, flags: FLAG.STALE_HR });
       break;
     default:           // work
-      if (SINGLE_SENSOR_STEPS.includes(_step)) {
-        Object.assign(f, { state: STATE.CAUTION, flags: FLAG.PPG_SINGLE, hrQuality: HRQ.SINGLE, hrB: null });
+      if (CADENCE_STEPS.includes(_step)) {
+        // The device drops a pulse that jumps to the step rate: no heart rate that second
+        Object.assign(f, { state: STATE.CAUTION, flags: FLAG.CADENCE_LOCK, hr: null, hrQuality: HRQ.NONE });
       }
-      if (evapKpa < THRESHOLDS.EVAP_CRITICAL) f.flags |= FLAG.EVAP_FAILING;
   }
   return f;
 }

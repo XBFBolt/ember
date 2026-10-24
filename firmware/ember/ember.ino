@@ -4,13 +4,13 @@
  *  ESP32-S3-DevKitC-1  ·  chest strap  ·  no display, app over BLE
  * ================================================================
  *
- *  WHAT IT MEASURES                          PIN (J1 header)
- *    pulse sensor A  (analog, 3V3)           GPIO4   J1-4
- *    pulse sensor B  (analog, 3V3)           GPIO5   J1-5
- *    skin thermistor A (10k NTC divider)     GPIO6   J1-6
- *    skin thermistor B (10k NTC divider)     GPIO7   J1-7
+ *  WHAT IT MEASURES (hardware v5)            PIN (J1 header)
+ *    pulse sensor    (analog, 3V3)           GPIO4   J1-4
+ *    air thermistor C (10k NTC divider, R3)  GPIO5   J1-5    hangs outside the strap
+ *    skin thermistor A (10k NTC divider, R1) GPIO6   J1-6
+ *    skin thermistor B (10k NTC divider, R2) GPIO7   J1-7
  *    battery sense, held at 0 V by R4        GPIO8   J1-12   (reads "no battery")
- *    I2C SDA  (SHT40 0x44, IMU 0x68)         GPIO17  J1-10
+ *    I2C SDA  (IMU 0x68)                     GPIO17  J1-10
  *    I2C SCL                                 GPIO18  J1-11
  *    3V3 out to every sensor                 3V3     J1-1
  *    power: USB-C port, from a power bank or the laptop
@@ -20,8 +20,8 @@
  *  radio and returns garbage while BLE is running.
  *
  *  NO LIBRARIES TO INSTALL. Everything here ships with the ESP32 Arduino
- *  core (3.x): Wire, Preferences, BLE. The SHT40 and IMU are driven with
- *  a few raw register reads instead of Adafruit's libraries - because
+ *  core (3.x): Wire, Preferences, BLE. The IMU is driven with a few raw
+ *  register reads instead of Adafruit's library - because
  *  the Adafruit MPU6050 library refuses to start unless the chip answers
  *  WHO_AM_I = 0x68, and most "ITG/MPU" GY-521 boards sold today carry a
  *  clone or an MPU-6500 that answers something else. The accelerometer
@@ -54,16 +54,24 @@
 
 using namespace ember;
 
-#define FW_VERSION "2.1"
+#define FW_VERSION "2.2.2"
 
 // ----------------------------------------------------------------- pins
-#define PIN_PPG_A   4
-#define PIN_PPG_B   5
+#define PIN_PPG     4
+#define PIN_NTC_C   5          // air thermistor (was pulse sensor B before v5)
 #define PIN_NTC_A   6
 #define PIN_NTC_B   7
 #define PIN_VBAT    8
 #define PIN_SDA    17
 #define PIN_SCL    18
+
+// The demo board's three dividers are built upside down: 3V3 -> thermistor ->
+// node -> R1/R2/R3 -> GND (the diagram has the 10k on the 3V3 side). Heat read
+// as cold until the firmware flipped them (ntcNodeMv). If a divider is rewired
+// to match the diagram, set its line to 0, reflash and run CAL again.
+#define NTC_A_ON_TOP 1         // skin A, R1
+#define NTC_B_ON_TOP 1         // skin B, R2
+#define NTC_C_ON_TOP 1         // air C, R3
 
 // ------------------------------------------------------------------ BLE
 #define BLE_NAME   "Ember"
@@ -75,23 +83,22 @@ using namespace ember;
 // Written by the sampler task on core 0, read by loop() on core 1.
 static const int PPG_N = 800;          // 8 s at 100 Hz
 static const int ACC_N = 400;          // 8 s at 50 Hz
-static float ppgA[PPG_N], ppgB[PPG_N];
+static float ppg[PPG_N];
 static float accBuf[ACC_N];
 static int ppgHead = 0, accHead = 0;
-static uint32_t satA = 0, satB = 0;    // samples at the ADC rails this second
-static float ntcAmV = NAN, ntcBmV = NAN, vbatmV = NAN;
-static float shtT = NAN, shtRH = NAN;
+static uint32_t sat = 0;               // samples at the ADC rails this second
+static float ntcAmV = NAN, ntcBmV = NAN, ntcCmV = NAN, vbatmV = NAN;
 static float accX = NAN, accY = NAN, accZ = NAN;
 static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
-struct RawPair { uint16_t a, b; };
+static NtcParams ntcP;                 // thermistor and divider constants
 static QueueHandle_t rawQ;             // raw PPG for the PPG plotter command
 static volatile bool streamPpg = false;
 
 static TaskHandle_t samplerTask = nullptr;
 static volatile bool i2cPaused = false;   // loop() borrows the bus for SCAN
-static bool haveImu = false, haveSht = false;
-static uint8_t imuAddr = 0x68, shtAddr = 0x44, imuWho = 0;
+static bool haveImu = false;
+static uint8_t imuAddr = 0x68, imuWho = 0;
 
 // -------------------------------------------------------------- devices
 
@@ -134,40 +141,6 @@ static bool imuRead(float &x, float &y, float &z) {
   return true;
 }
 
-// SHT40: high-precision single shot. Trigger, wait >= 9 ms, read 6 bytes.
-static uint8_t crc8(const uint8_t *d, int n) {
-  uint8_t c = 0xFF;
-  for (int i = 0; i < n; i++) {
-    c ^= d[i];
-    for (int b = 0; b < 8; b++) c = (c & 0x80) ? (uint8_t)((c << 1) ^ 0x31) : (uint8_t)(c << 1);
-  }
-  return c;
-}
-
-static bool shtInit() {
-  for (uint8_t a : {(uint8_t)0x44, (uint8_t)0x45}) {
-    if (i2cPresent(a)) { shtAddr = a; return true; }
-  }
-  return false;
-}
-
-static void shtTrigger() {
-  Wire.beginTransmission(shtAddr);
-  Wire.write(0xFD);
-  Wire.endTransmission();
-}
-
-static bool shtFetch(float &t, float &rh) {
-  if (Wire.requestFrom(shtAddr, (uint8_t)6) != 6) return false;
-  uint8_t b[6];
-  for (int i = 0; i < 6; i++) b[i] = Wire.read();
-  if (crc8(b, 2) != b[2] || crc8(b + 3, 2) != b[5]) return false;
-  uint16_t rt = (b[0] << 8) | b[1], rr = (b[3] << 8) | b[4];
-  t  = -45.0f + 175.0f * rt / 65535.0f;
-  rh = fminf(fmaxf(-6.0f + 125.0f * rr / 65535.0f, 0.0f), 100.0f);
-  return true;
-}
-
 static float readMilliVoltsAvg(int pin, int n) {
   uint32_t s = 0;
   for (int i = 0; i < n; i++) s += analogReadMilliVolts(pin);
@@ -179,23 +152,21 @@ static float readMilliVoltsAvg(int pin, int n) {
 // bus, so nothing else touches them while it runs.
 
 static void samplerLoop(void *) {
-  Prefilter pfA(PPG_HP_A, PPG_LP_A), pfB(PPG_HP_A, PPG_LP_A), pfAcc(ACC_HP_A, ACC_LP_A);
+  Prefilter pf(PPG_HP_A, PPG_LP_A), pfAcc(ACC_HP_A, ACC_LP_A);
   TickType_t last = xTaskGetTickCount();
   uint32_t tick = 0;
   for (;;) {
     vTaskDelayUntil(&last, pdMS_TO_TICKS(10));
     tick++;
 
-    int a = analogRead(PIN_PPG_A);
-    int b = analogRead(PIN_PPG_B);
-    float fa = pfA.step((float)a), fb = pfB.step((float)b);
+    int a = analogRead(PIN_PPG);
+    float fa = pf.step((float)a);
     portENTER_CRITICAL(&mux);
-    ppgA[ppgHead] = fa; ppgB[ppgHead] = fb;
+    ppg[ppgHead] = fa;
     ppgHead = (ppgHead + 1) % PPG_N;
-    if (a <= 8 || a >= 4087) satA++;
-    if (b <= 8 || b >= 4087) satB++;
+    if (a <= 8 || a >= 4087) sat++;
     portEXIT_CRITICAL(&mux);
-    if (streamPpg) { RawPair p = {(uint16_t)a, (uint16_t)b}; xQueueSend(rawQ, &p, 0); }
+    if (streamPpg) { uint16_t raw = (uint16_t)a; xQueueSend(rawQ, &raw, 0); }
 
     if (haveImu && !i2cPaused && (tick % 2 == 0)) {      // 50 Hz
       float x, y, z;
@@ -209,38 +180,35 @@ static void samplerLoop(void *) {
     }
 
     if (tick % 100 == 50) {                              // 1 Hz, slow stuff
-      float na = readMilliVoltsAvg(PIN_NTC_A, 16);
-      float nb = readMilliVoltsAvg(PIN_NTC_B, 16);
+      // Flipped here, once, so CAL, TEMP and the frame all see the same
+      // value. TEMP's mV for a flipped bead is then the standard divider's
+      // equivalent (3300 minus the pin voltage), not what a multimeter shows.
+      float na = ntcNodeMv(readMilliVoltsAvg(PIN_NTC_A, 16), NTC_A_ON_TOP, ntcP);
+      float nb = ntcNodeMv(readMilliVoltsAvg(PIN_NTC_B, 16), NTC_B_ON_TOP, ntcP);
+      float nc = ntcNodeMv(readMilliVoltsAvg(PIN_NTC_C, 16), NTC_C_ON_TOP, ntcP);
       float vb = readMilliVoltsAvg(PIN_VBAT, 16);
       portENTER_CRITICAL(&mux);
-      ntcAmV = na; ntcBmV = nb; vbatmV = vb;
+      ntcAmV = na; ntcBmV = nb; ntcCmV = nc; vbatmV = vb;
       portEXIT_CRITICAL(&mux);
-    }
-
-    if (haveSht && !i2cPaused) {                         // every 2 s
-      if (tick % 200 == 0) shtTrigger();
-      if (tick % 200 == 2) {
-        float t, rh;
-        bool ok = shtFetch(t, rh);
-        portENTER_CRITICAL(&mux);
-        if (ok) { shtT = t; shtRH = rh; } else { shtT = NAN; shtRH = NAN; }
-        portEXIT_CRITICAL(&mux);
-      }
     }
   }
 }
 
 // ----------------------------------------------------------- persistent
+// "cal" covers the skin beads A and B (it gates the skin doubt); "calC" the
+// air bead, new in 2.2. A board calibrated under 2.1 has "cal" (against the
+// SHT40) and no "calC": CAL then keeps A and B and calibrates C against them.
 Preferences prefs;
-static float calA = 1.0f, calB = 1.0f;
-static bool calibrated = false;
-static NtcParams ntcP;
+static float calA = 1.0f, calB = 1.0f, calC = 1.0f;
+static bool calibrated = false, calAir = false;
 
 static void loadCal() {
   prefs.begin("ember", true);
   calA = prefs.getFloat("kA", 1.0f);
   calB = prefs.getFloat("kB", 1.0f);
+  calC = prefs.getFloat("kC", 1.0f);
   calibrated = prefs.getBool("cal", false);
+  calAir = prefs.getBool("calC", false);
   prefs.end();
 }
 
@@ -248,7 +216,9 @@ static void saveCal() {
   prefs.begin("ember", false);
   prefs.putFloat("kA", calA);
   prefs.putFloat("kB", calB);
+  prefs.putFloat("kC", calC);
   prefs.putBool("cal", calibrated);
+  prefs.putBool("calC", calAir);
   prefs.end();
 }
 
@@ -269,8 +239,8 @@ static const int BASELINE_SEC = 300;
 static bool calRunning = false; static int calSec = 0;
 static int calStartIn = 0;                 // seconds until a delayed CAL begins
 RTC_DATA_ATTR int calOnWake = 0;               // survives deep sleep: CALSLEEP sets it
-static double calSumT = 0, calSumA = 0, calSumB = 0;
-static float calMinT, calMaxT, calMinA, calMaxA, calMinB, calMaxB;
+static double calSum[NTC_BEADS];           // per bead: A, B, C (node mV)
+static float calMin[NTC_BEADS], calMax[NTC_BEADS];
 static const int CAL_SEC = 30;
 
 static float activityG = 0.0f;
@@ -285,8 +255,8 @@ static uint16_t seq = 0;
 
 // Latest analysis, for STATUS and the frame.
 struct Snapshot {
-  Channel chA, chB; Periodicity pA, pB, cad; Fused hr;
-  float tA, tB; SkinResult skin; float microC, microRh, headroom;
+  Channel ch; Periodicity p, cad; HeartRate hr;
+  float tA, tB, tC; SkinResult skin; float airC;
   float vbat; bool battPresent; uint8_t battPct;
   float ct, half, kalmanHalf; uint16_t flags; State state;
 } snap;
@@ -347,12 +317,11 @@ static void i2cScan() {
   for (uint8_t a = 1; a < 127; a++) {
     if (!i2cPresent(a)) continue;
     Serial.printf("#   0x%02X", a);
-    if (a == 0x44 || a == 0x45) Serial.print("  SHT40 microclimate");
     if (a == 0x68 || a == 0x69) Serial.print("  IMU (GY-521 / ITG-MPU)");
     Serial.println();
     n++;
   }
-  Serial.printf("# %d device(s). Expect 2: 0x44 and 0x68.\n", n);
+  Serial.printf("# %d device(s). Expect 1: 0x68.\n", n);
   if (haveImu) Serial.printf("# IMU WHO_AM_I = 0x%02X (%s)\n", imuWho,
       imuWho == 0x68 ? "MPU-6050" : imuWho == 0x70 ? "MPU-6500" :
       imuWho == 0x72 ? "MPU-6050 clone" : "unknown clone - accel still works");
@@ -363,15 +332,15 @@ static void printHelp() {
   Serial.println(
     "# EMBER commands (serial 115200, or written to the BLE command characteristic)\n"
     "#  bring-up\n"
-    "#   SCAN      I2C scan - expect 0x44 SHT40 and 0x68 IMU\n"
-    "#   PPG       raw pulse sensors at 100 Hz for Tools > Serial Plotter\n"
-    "#   HR        per-sensor heart rate, signal quality, fused result, 1 Hz\n"
-    "#   TEMP      thermistors (mV, kOhm, C), SHT40, evaporative headroom, 1 Hz\n"
+    "#   SCAN      I2C scan - expect 0x68 IMU\n"
+    "#   PPG       raw pulse sensor at 100 Hz for Tools > Serial Plotter\n"
+    "#   HR        heart rate, signal quality, cadence check, 1 Hz\n"
+    "#   TEMP      thermistors (mV, kOhm, C): skin A, skin B, air C, 1 Hz\n"
     "#   IMU       accelerometer, activity, step cadence, 1 Hz\n"
     "#   BATT      battery voltage and percent, 1 Hz\n"
     "#   STATUS    everything, once\n"
     "#  calibration and use\n"
-    "#   CAL       calibrate both thermistors against the SHT40 (30 s)\n"
+    "#   CAL       calibrate the three thermistors against each other (30 s)\n"
     "#   CALSLEEP  sleep 20 min to cool, then CAL. Laptop USB only: a power\n"
     "#             bank switches off while the board sleeps\n"
     "#   CALCLEAR  forget the calibration\n"
@@ -382,61 +351,94 @@ static void printHelp() {
     "#  any new command stops a running stream");
 }
 
+// The air bead's latest temperature, NAN if it isn't reading.
+static float latestAirC() {
+  float mv;
+  portENTER_CRITICAL(&mux); mv = ntcCmV; portEXIT_CRITICAL(&mux);
+  return airTemp(ntcTempC(mv, calC, ntcP));
+}
+
 static void printId() {
-  Serial.printf("# EMBER v%s - two pulse sensors, two thermistors, SHT40, IMU, BLE\n", FW_VERSION);
+  Serial.printf("# EMBER v%s - one pulse sensor, three thermistors (2 skin, 1 air), IMU, BLE\n", FW_VERSION);
   Serial.printf("# coefficient check %s\n", coefficientsSane() ? "PASS" : "FAIL");
   Serial.printf("# conformal %.0f%% level, %d strata, measured coverage %.1f%%\n",
                 CONF_LEVEL * 100, CONF_N_STRATA, CONF_MEASURED_COV * 100);
   Serial.printf("# never withholds the number at or above %.1f C\n", CT_WATCH_C);
-  Serial.printf("# sensors: IMU %s, SHT40 %s\n", haveImu ? "yes" : "NO", haveSht ? "yes" : "NO");
-  Serial.printf("# thermistor calibration: %s (kA %.4f, kB %.4f)\n",
-                calibrated ? "yes" : "NO - run CAL (skin checks are off until then)", calA, calB);
+  float air = latestAirC();
+  if (isnan(air)) Serial.printf("# sensors: IMU %s, air thermistor NO\n", haveImu ? "yes" : "NO");
+  else Serial.printf("# sensors: IMU %s, air thermistor yes (%.1f C)\n", haveImu ? "yes" : "NO", air);
+  const char *cal = calibrated && calAir ? "yes"
+                  : calibrated ? "skin yes, air NO - run CAL (calibrates air against skin)"
+                  : "NO - run CAL (skin checks are off until then)";
+  Serial.printf("# thermistor calibration: %s (kA %.4f, kB %.4f, kC %.4f)\n", cal, calA, calB, calC);
   Serial.printf("# baseline: %s\n", baselineValid ? "captured" : "not captured - run BASELINE");
   Serial.printf("# BLE name \"%s\", %s\n", BLE_NAME, bleConnected ? "app connected" : "advertising");
 }
 
 static void csvHeader() {
-  Serial.println("ms,hrA,sqiA,hrB,sqiB,hr,hr_q,step_hz,act_g,skinA,skinB,skin,skin_q,"
-                 "micro_c,micro_rh,evap_kpa,vbat,ct_est,ct_lo,ct_hi,kalman_half,"
-                 "filter_step,state,flags");
+  Serial.println("ms,hr,sqi,hr_q,step_hz,act_g,skinA,skinB,skin,skin_q,air_c,vbat,"
+                 "ct_est,ct_lo,ct_hi,kalman_half,filter_step,state,flags");
 }
+
+// A board calibrated under 2.1 (skin beads against the SHT40) keeps A and B
+// and calibrates only C against them. CALCLEAR first to redo all three.
+static bool calKeepsSkin() { return calibrated && !calAir; }
 
 static void startCal() {
   calRunning = true; calSec = 0;
-  calSumT = calSumA = calSumB = 0;
-  calMinT = calMinA = calMinB = 1e9f;
-  calMaxT = calMaxA = calMaxB = -1e9f;
-  Serial.println("# CAL: thermistors and SHT40 must be at the SAME temperature.");
-  Serial.println("# Device unpowered at room temperature for 30+ min, SHT40 lying");
-  Serial.println("# against the case floor, nothing warm nearby. Collecting 30 s...");
+  for (int i = 0; i < NTC_BEADS; i++) { calSum[i] = 0; calMin[i] = 1e9f; calMax[i] = -1e9f; }
+  Serial.println("# CAL: all three thermistors must be at the SAME temperature.");
+  Serial.println("# Device unpowered at room temperature for 30+ min, the air bead");
+  Serial.println("# lying beside the case, nothing warm nearby. Collecting 30 s...");
+  if (calKeepsSkin())
+    Serial.println("# skin beads keep their SHT40 calibration; calibrating the air bead against them.");
 }
 
-static void finishCal(float mvA, float mvB) {
-  (void)mvA; (void)mvB;
+static void finishCal() {
   calRunning = false;
-  float T = calSumT / CAL_SEC, A = calSumA / CAL_SEC, B = calSumB / CAL_SEC;
-  float spreadT = calMaxT - calMinT, spreadA = calMaxA - calMinA, spreadB = calMaxB - calMinB;
-  Serial.printf("# SHT40 %.2f C (spread %.2f)\n", T, spreadT);
-  if (spreadT > 0.15f) { Serial.println("# CAL FAILED: SHT40 still drifting. Wait and retry."); return; }
-  NtcParams p = ntcP;
-  float rA = ntcResistance(A, p), rB = ntcResistance(B, p);
-  if (isnan(rA) || isnan(rB)) { Serial.println("# CAL FAILED: a thermistor reads open or short. Check wiring."); return; }
-  float rTrue = ntcRFromTemp(T, p);
-  float kA = rA / rTrue, kB = rB / rTrue;
-  Serial.printf("# bead A %.0f ohm (raw %.2f C, spread %.0f mV)  ->  k = %.4f\n",
-                rA, ntcTempC(A, 1.0f, p), spreadA, kA);
-  Serial.printf("# bead B %.0f ohm (raw %.2f C, spread %.0f mV)  ->  k = %.4f\n",
-                rB, ntcTempC(B, 1.0f, p), spreadB, kB);
-  if (kA < 0.85f || kA > 1.15f || kB < 0.85f || kB > 1.15f) {
-    Serial.println("# CAL FAILED: correction outside +/-15 %. That is not thermistor");
-    Serial.println("# tolerance - check that the fixed resistors are 10k and the");
-    Serial.println("# divider is wired 3V3 -> 10k -> node -> thermistor -> GND.");
+  const NtcParams p = ntcP;
+  const char *name[NTC_BEADS] = {"skin A", "skin B", "air C"};
+  float mv[NTC_BEADS], k[NTC_BEADS] = {calA, calB, calC};
+  bool keep[NTC_BEADS] = {calKeepsSkin(), calKeepsSkin(), false};
+  for (int i = 0; i < NTC_BEADS; i++) {
+    mv[i] = calSum[i] / CAL_SEC;
+    if (isnan(ntcTempC(mv[i], 1.0f, p))) {
+      Serial.printf("# CAL FAILED: %s reads open or short. Check wiring.\n", name[i]);
+      return;
+    }
+    float drift = fabsf(ntcTempC(calMin[i], 1.0f, p) - ntcTempC(calMax[i], 1.0f, p));
+    if (!(drift <= CAL_DRIFT_C)) {         // also catches a bead that went open mid-CAL
+      Serial.printf("# CAL FAILED: %s moved %.2f C in 30 s - still settling. Wait and retry.\n",
+                    name[i], drift);
+      return;
+    }
+  }
+  float ref = NAN;
+  CalStatus st = ntcCalibrate(mv, NTC_BEADS, keep, k, p, &ref);
+  for (int i = 0; i < NTC_BEADS; i++)
+    Serial.printf("# %-6s %6.0f ohm (raw %.2f C)%s\n", name[i], ntcResistance(mv[i], p),
+                  ntcTempC(mv[i], 1.0f, p), keep[i] ? "  kept" : "");
+  if (st == CAL_OPEN_OR_SHORT) {
+    Serial.println("# CAL FAILED: a thermistor reads open or short. Check wiring.");
     return;
   }
-  calA = kA; calB = kB; calibrated = true;
+  if (st == CAL_BEADS_APART) {
+    Serial.printf("# CAL FAILED: the beads are more than %.1f C apart. They are not at the\n", CAL_MAX_APART_C);
+    Serial.println("# same temperature (one in a hand or on skin?), or a divider is miswired:");
+    Serial.println("# check R1-R3 are 10k, wired 3V3 -> 10k -> node -> thermistor -> GND.");
+    return;
+  }
+  if (st == CAL_NOT_ROOM) {
+    Serial.printf("# CAL FAILED: the beads agree on %.1f C, which is not room temperature\n", ref);
+    Serial.printf("# (%.0f-%.0f C). Calibrate indoors, or check R1-R3 are all 10k.\n", CAL_ROOM_LO, CAL_ROOM_HI);
+    return;
+  }
+  calA = k[0]; calB = k[1]; calC = k[2];
+  calibrated = true; calAir = true;
   saveCal();
-  Serial.printf("# CAL saved. Both beads now read %.2f / %.2f C against SHT40 %.2f C\n",
-                ntcTempC(A, calA, p), ntcTempC(B, calB, p), T);
+  Serial.printf("# CAL saved (kA %.4f, kB %.4f, kC %.4f). Beads now read %.2f / %.2f / %.2f C,\n",
+                calA, calB, calC, ntcTempC(mv[0], calA, p), ntcTempC(mv[1], calB, p), ntcTempC(mv[2], calC, p));
+  Serial.printf("# %s %.2f C.\n", keep[0] ? "against the skin beads'" : "their shared reference", ref);
 }
 
 static void handleCommand(String s) {
@@ -459,7 +461,7 @@ static void handleCommand(String s) {
                               Serial.flush(); calOnWake = 1;
                               esp_sleep_enable_timer_wakeup(20ULL * 60ULL * 1000000ULL);
                               delay(100); esp_deep_sleep_start(); }
-  else if (s == "CALCLEAR") { calA = calB = 1.0f; calibrated = false; saveCal();
+  else if (s == "CALCLEAR") { calA = calB = calC = 1.0f; calibrated = calAir = false; saveCal();
                               Serial.println("# calibration cleared"); }
   else if (s == "BASELINE") {
     if (!baselineAllowed(ect.clamped(), everUpdated)) {
@@ -479,18 +481,15 @@ static void handleCommand(String s) {
 
 // ------------------------------------------------------- one analysis tick
 
-static float bufA[PPG_N], bufB[PPG_N], bufAcc[ACC_N];
+static float buf[PPG_N], bufAcc[ACC_N];
 
 static void analyse() {
-  uint32_t sA, sB; float nA, nB, vb, mT, mRH;
+  uint32_t sats; float nA, nB, nC, vb;
   portENTER_CRITICAL(&mux);
-  for (int i = 0; i < PPG_N; i++) {
-    int k = (ppgHead + i) % PPG_N;               // oldest first
-    bufA[i] = ppgA[k]; bufB[i] = ppgB[k];
-  }
+  for (int i = 0; i < PPG_N; i++) buf[i] = ppg[(ppgHead + i) % PPG_N];   // oldest first
   for (int i = 0; i < ACC_N; i++) bufAcc[i] = accBuf[(accHead + i) % ACC_N];
-  sA = satA; sB = satB; satA = satB = 0;
-  nA = ntcAmV; nB = ntcBmV; vb = vbatmV; mT = shtT; mRH = shtRH;
+  sats = sat; sat = 0;
+  nA = ntcAmV; nB = ntcBmV; nC = ntcCmV; vb = vbatmV;
   portEXIT_CRITICAL(&mux);
 
   // motion
@@ -509,17 +508,16 @@ static void analyse() {
   float stepHz = (cad.sqi >= 0.4f) ? cad.freqHz : NAN;
 
   // heart rate
-  Periodicity pA = periodicity(bufA, PPG_N, PPG_FS, HR_MIN / 60.0f, HR_MAX / 60.0f);
-  Periodicity pB = periodicity(bufB, PPG_N, PPG_FS, HR_MIN / 60.0f, HR_MAX / 60.0f);
-  Channel chA = judgeChannel(pA, sA > 5);
-  Channel chB = judgeChannel(pB, sB > 5);
-  cadenceCheck(chA, chB, stepHz, moving, hrRef.hr);
-  Fused hr = fuseHr(chA, chB);
+  Periodicity p = periodicity(buf, PPG_N, PPG_FS, HR_MIN / 60.0f, HR_MAX / 60.0f);
+  Channel ch = judgeChannel(p, sats > 5);
+  cadenceCheck(ch, stepHz, moving, hrRef.hr);
+  HeartRate hr = heartRateOf(ch);
 
-  // skin, microclimate, battery
+  // skin, air, battery
   float tA = ntcTempC(nA, calA, ntcP), tB = ntcTempC(nB, calB, ntcP);
   SkinResult skin = fuseSkin(tA, tB);
-  float headroom = evaporativeHeadroom(skin.tC, mT, mRH);
+  float tC = ntcTempC(nC, calC, ntcP);
+  float airC = airTemp(tC);
   float vbat = 2.0f * vb / 1000.0f;
   bool battPresent = vbat > 2.5f;               // below: no battery, running on USB
 
@@ -564,14 +562,15 @@ static void analyse() {
   // calibration
   if (calStartIn > 0 && --calStartIn == 0) startCal();   // sensors have settled
   if (calRunning) {
-    if (isnan(mT) || isnan(nA) || isnan(nB)) {
-      calRunning = false; Serial.println("# CAL FAILED: SHT40 or a thermistor not reading");
+    const float mv[NTC_BEADS] = {nA, nB, nC};
+    if (isnan(nA) || isnan(nB) || isnan(nC)) {
+      calRunning = false; Serial.println("# CAL FAILED: a thermistor is not reading yet. Retry in a few seconds.");
     } else {
-      calSumT += mT; calSumA += nA; calSumB += nB; calSec++;
-      calMinT = fminf(calMinT, mT); calMaxT = fmaxf(calMaxT, mT);
-      calMinA = fminf(calMinA, nA); calMaxA = fmaxf(calMaxA, nA);
-      calMinB = fminf(calMinB, nB); calMaxB = fmaxf(calMaxB, nB);
-      if (calSec >= CAL_SEC) finishCal(nA, nB);
+      for (int i = 0; i < NTC_BEADS; i++) {
+        calSum[i] += mv[i];
+        calMin[i] = fminf(calMin[i], mv[i]); calMax[i] = fmaxf(calMax[i], mv[i]);
+      }
+      if (++calSec >= CAL_SEC) finishCal();
     }
   }
 
@@ -589,20 +588,20 @@ static void analyse() {
   float half = conformal_half_width(ct) + coastInflation(coastMinutes);
   Inputs in{};
   in.ctEst = ct;
-  in.hr = hr.hr; in.hrQ = hr.q;
-  in.cadenceLockSeen = chA.cadenceLocked || chB.cadenceLocked;
+  in.hr = hr.hr;
+  in.cadenceLockSeen = ch.cadenceLocked;
   in.coastMinutes = coastMinutes; in.everUpdated = everUpdated;
-  in.skinC = skin.tC; in.skinQ = skin.q; in.headroom = headroom;
-  in.haveMicro = haveSht && !isnan(mT);
+  in.skinC = skin.tC; in.skinQ = skin.q;
+  in.haveAir = !isnan(airC);
   in.haveImu = haveImu; in.activityG = activityG; in.secSinceMoving = secSinceMoving;
   in.baselineValid = baselineValid; in.baselineRunning = baselineRunning; in.restHr = restHr;
   in.calibrated = calibrated; in.lowBatt = lowBattSec >= 30;
   uint16_t flags = confoundFlags(in);
   State st = stateFromFlags(flags, ct);
 
-  snap.chA = chA; snap.chB = chB; snap.pA = pA; snap.pB = pB; snap.cad = cad; snap.hr = hr;
-  snap.tA = tA; snap.tB = tB; snap.skin = skin; snap.microC = mT; snap.microRh = mRH;
-  snap.headroom = headroom; snap.vbat = vbat; snap.battPresent = battPresent;
+  snap.ch = ch; snap.p = p; snap.cad = cad; snap.hr = hr;
+  snap.tA = tA; snap.tB = tB; snap.tC = tC; snap.skin = skin; snap.airC = airC;
+  snap.vbat = vbat; snap.battPresent = battPresent;
   snap.battPct = battPresent ? lipoPercent(vbat) : 255;
   snap.ct = ct; snap.half = half; snap.kalmanHalf = 1.96f * sqrtf(ect.v);
   snap.flags = flags; snap.state = st;
@@ -617,9 +616,8 @@ static void analyse() {
     f.ctC = show ? ct : NAN; f.halfC = show ? half : NAN;
     f.state = st; f.baselineRunning = baselineRunning; f.logging = logging;
     f.flags = flags; f.hr = hr.hr; f.hrQ = hr.q;
-    f.skinC = skin.tC; f.microC = mT; f.microRh = mRH; f.headroomKpa = headroom;
+    f.skinC = skin.tC; f.airC = airC;
     f.battPct = snap.battPct; f.activityG = activityG;
-    f.hrA = chA.hr; f.hrB = chB.hr;
     uint8_t b[PACKET_LEN];
     encodeFrame(f, b);
     liveChr->setValue(b, PACKET_LEN);
@@ -628,26 +626,25 @@ static void analyse() {
 
   // to the serial port
   if (logging) {
-    Serial.printf("%lu,%.1f,%.2f,%.1f,%.2f,%.1f,%d,%.2f,%.3f,%.2f,%.2f,%.2f,%d,"
-                  "%.2f,%.1f,%.3f,%.2f,%.3f,%.3f,%.3f,%.3f,%d,%d,0x%04X\n",
-                  millis(), chA.hr, pA.sqi, chB.hr, pB.sqi, hr.hr, (int)hr.q, stepHz, activityG,
-                  tA, tB, skin.tC, (int)skin.q, mT, mRH, headroom, vbat,
+    Serial.printf("%lu,%.1f,%.2f,%d,%.2f,%.3f,%.2f,%.2f,%.2f,%d,%.2f,%.2f,"
+                  "%.3f,%.3f,%.3f,%.3f,%d,%d,0x%04X\n",
+                  millis(), hr.hr, p.sqi, (int)hr.q, stepHz, activityG,
+                  tA, tB, skin.tC, (int)skin.q, airC, vbat,
                   ct, ct - half, ct + half, snap.kalmanHalf, lastStepKind, (int)st, flags);
   }
   switch (stream) {
     case S_HR:
-      Serial.printf("A %5.1f bpm sqi %.2f%s%s | B %5.1f bpm sqi %.2f%s%s | fused %5.1f %s | cadence %.2f Hz\n",
-        chA.hr, pA.sqi, chA.cadenceLocked ? " CADENCE" : "", sA > 5 ? " SAT" : "",
-        chB.hr, pB.sqi, chB.cadenceLocked ? " CADENCE" : "", sB > 5 ? " SAT" : "",
-        hr.hr, hr.q == HRQ_AGREED ? "AGREED" : hr.q == HRQ_SINGLE ? "SINGLE" :
-               hr.q == HRQ_DISAGREE ? "DISAGREE" : "NONE", stepHz);
+      Serial.printf("HR %5.1f bpm sqi %.2f %s%s%s | cadence %.2f Hz\n",
+        hr.hr, p.sqi, hr.q == HRQ_OK ? "OK" : "NONE",
+        ch.cadenceLocked ? " CADENCE" : "", sats > 5 ? " SAT" : "", stepHz);
       break;
     case S_TEMP:
-      Serial.printf("A %4.0f mV %5.2f k %5.2f C | B %4.0f mV %5.2f k %5.2f C | skin %5.2f %s | SHT40 %5.2f C %4.1f %% | headroom %.2f kPa\n",
+      Serial.printf("A %4.0f mV %5.2f k %5.2f C | B %4.0f mV %5.2f k %5.2f C | skin %5.2f %s | air C %4.0f mV %5.2f k %5.2f C\n",
         nA, ntcResistance(nA, ntcP) / 1000.0f / calA, tA,
         nB, ntcResistance(nB, ntcP) / 1000.0f / calB, tB, skin.tC,
         skin.q == SKIN_AGREED ? "AGREED" : skin.q == SKIN_SINGLE ? "SINGLE" :
-        skin.q == SKIN_DISAGREE ? "DISAGREE" : "NONE", mT, mRH, headroom);
+        skin.q == SKIN_DISAGREE ? "DISAGREE" : "NONE",
+        nC, ntcResistance(nC, ntcP) / 1000.0f / calC, airC);
       break;
     case S_IMU: {
       float x, y, z;
@@ -660,10 +657,9 @@ static void analyse() {
       else Serial.printf("no battery seen (%.2f V at the divider) - running on USB\n", vbat);
       break;
     case S_STATUS:
-      Serial.printf("# HR  A %.1f (sqi %.2f)  B %.1f (sqi %.2f)  fused %.1f q%d\n",
-                    chA.hr, pA.sqi, chB.hr, pB.sqi, hr.hr, (int)hr.q);
-      Serial.printf("# skin A %.2f  B %.2f  -> %.2f q%d   SHT40 %.2f C %.1f %%  headroom %.2f kPa\n",
-                    tA, tB, skin.tC, (int)skin.q, mT, mRH, headroom);
+      Serial.printf("# HR %.1f (sqi %.2f) q%d%s\n", hr.hr, p.sqi, (int)hr.q, ch.cadenceLocked ? " CADENCE" : "");
+      Serial.printf("# skin A %.2f  B %.2f  -> %.2f q%d   air %.2f C\n",
+                    tA, tB, skin.tC, (int)skin.q, airC);
       Serial.printf("# activity %.3f g  cadence %.2f Hz   battery %.2f V\n", activityG, stepHz, vbat);
       Serial.printf("# core %.2f +/- %.2f C (Kalman would claim +/- %.2f)  state %s  flags 0x%04X  %s\n",
                     ct, half, snap.kalmanHalf, st == STATE_OK ? "OK" : st == STATE_CAUTION ? "CAUTION" : "REFUSE",
@@ -689,23 +685,28 @@ void setup() {
   analogSetAttenuation(ADC_11db);      // full ~0-3.1 V range on every pin
 
   Wire.begin(PIN_SDA, PIN_SCL);
-  Wire.setClock(100000);               // 100 kHz: the SHT40 is on a lead
+  Wire.setClock(100000);               // 100 kHz is plenty for the IMU
   haveImu = imuInit();
-  haveSht = shtInit();
 
   loadCal();
-  for (int i = 0; i < PPG_N; i++) ppgA[i] = ppgB[i] = 0;
+  for (int i = 0; i < PPG_N; i++) ppg[i] = 0;
   for (int i = 0; i < ACC_N; i++) accBuf[i] = 0;
 
-  rawQ = xQueueCreate(256, sizeof(RawPair));
+  rawQ = xQueueCreate(256, sizeof(uint16_t));
   xTaskCreatePinnedToCore(samplerLoop, "sampler", 4096, nullptr, 3, &samplerTask, 0);
 
   bleStart();
   i2cScan();
+  // Let the first thermistor reading land (1 Hz), so ID can say whether the air bead reads.
+  for (uint32_t t0 = millis(); millis() - t0 < 1500; delay(10)) {
+    float mv;
+    portENTER_CRITICAL(&mux); mv = ntcCmV; portEXIT_CRITICAL(&mux);
+    if (!isnan(mv)) break;
+  }
   printId();
   if (calOnWake) {                     // woke from CALSLEEP: board is still cold
     calOnWake = 0;
-    calStartIn = 5;                    // let the first SHT40 and NTC readings land
+    calStartIn = 5;                    // let the first thermistor readings land
     Serial.println("# woke from CALSLEEP - calibrating in 5 s");
   }
   Serial.println("# type HELP for commands");
@@ -731,8 +732,8 @@ void loop() {
 
   // raw PPG for the plotter
   if (streamPpg) {
-    RawPair p;
-    while (xQueueReceive(rawQ, &p, 0) == pdTRUE) Serial.printf("ppgA:%u,ppgB:%u\n", p.a, p.b);
+    uint16_t raw;
+    while (xQueueReceive(rawQ, &raw, 0) == pdTRUE) Serial.printf("ppg:%u\n", raw);
   }
 
   uint32_t now = millis();

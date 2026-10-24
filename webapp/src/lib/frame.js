@@ -22,23 +22,24 @@ export const STATE = { OK: 0, CAUTION: 1, REFUSE: 2 };
 const STATE_BASELINE = 0x10;
 const STATE_LOGGING  = 0x20;
 
-/** Heart-rate quality, byte 9. */
-export const HRQ = { NONE: 0, SINGLE: 1, AGREED: 2, DISAGREE: 3 };
+/** Heart-rate quality, byte 9. (2 and 3 were 2.1's two-sensor states; 2.2 never sends them.) */
+export const HRQ = { NONE: 0, OK: 1 };
 
+/** Reserved bits are never set (firmware 2.2). Never reuse 0x0010, 0x0100, 0x0200. */
 export const FLAG = {
   MOTIONLESS_TACHY: 0x0001,
-  NO_THERMAL_LOAD:  0x0002,
+  RESERVED_0002:    0x0002,   // was NO_THERMAL_LOAD (2.1, needed humidity)
   COOL_SKIN:        0x0004,
   STALE_HR:         0x0008,
-  RESERVED_0010:    0x0010,   // was WIDE_INTERVAL in 2.0. Never set, never reuse
+  RESERVED_0010:    0x0010,   // was WIDE_INTERVAL in 2.0
   NO_BASELINE:      0x0020,
   CADENCE_LOCK:     0x0040,
-  EVAP_FAILING:     0x0080,
-  PPG_DISAGREE:     0x0100,
-  PPG_SINGLE:       0x0200,
+  RESERVED_0080:    0x0080,   // was EVAP_FAILING (2.1, needed humidity)
+  RESERVED_0100:    0x0100,   // was PPG_DISAGREE (2.1, two pulse sensors)
+  RESERVED_0200:    0x0200,   // was PPG_SINGLE (2.1, two pulse sensors)
   SKIN_DISAGREE:    0x0400,
   SKIN_SINGLE:      0x0800,
-  NO_MICRO:         0x1000,
+  NO_AIR:           0x1000,
   LOW_BATT:         0x2000,
   NOT_CALIBRATED:   0x4000,
   BASELINE_RUNNING: 0x8000,
@@ -48,24 +49,20 @@ export const FLAG = {
 export const FLAG_TEXT = {
   [FLAG.STALE_HR]:         'no trustworthy heart rate',
   [FLAG.MOTIONLESS_TACHY]: 'high HR while still',
-  [FLAG.NO_THERMAL_LOAD]:  'no thermal load',
   [FLAG.COOL_SKIN]:        'skin not warm',
-  [FLAG.PPG_DISAGREE]:     'pulse sensors disagree',
   [FLAG.CADENCE_LOCK]:     'pulse matches step cadence',
-  [FLAG.PPG_SINGLE]:       'one pulse sensor only',
   [FLAG.BASELINE_RUNNING]: 'baseline in progress',
   [FLAG.NO_BASELINE]:      'no baseline yet',
   [FLAG.SKIN_DISAGREE]:    'skin sensors disagree',
   [FLAG.NOT_CALIBRATED]:   'thermistors not calibrated',
-  [FLAG.NO_MICRO]:         'no microclimate sensor',
+  [FLAG.NO_AIR]:           'no air temperature sensor',
 };
 
 /** One reason per state: the first set flag in this order (flagReason()). */
 export const REASON_ORDER = [
-  FLAG.STALE_HR, FLAG.MOTIONLESS_TACHY, FLAG.NO_THERMAL_LOAD, FLAG.COOL_SKIN,
-  FLAG.PPG_DISAGREE, FLAG.CADENCE_LOCK, FLAG.PPG_SINGLE,
+  FLAG.STALE_HR, FLAG.MOTIONLESS_TACHY, FLAG.COOL_SKIN, FLAG.CADENCE_LOCK,
   FLAG.BASELINE_RUNNING, FLAG.NO_BASELINE,
-  FLAG.SKIN_DISAGREE, FLAG.NOT_CALIBRATED, FLAG.NO_MICRO,
+  FLAG.SKIN_DISAGREE, FLAG.NOT_CALIBRATED, FLAG.NO_AIR,
 ];
 
 /** The flag that gives the reason, or 0 when none applies. */
@@ -79,6 +76,8 @@ const I16_NONE = -32768;
  * 20-byte little-endian frame → object. null means "not available".
  * Accepts a DataView (Web Bluetooth), an ArrayBuffer or a Uint8Array.
  * On REFUSE the device sends core and half as null on purpose: never fill them.
+ * Bytes 14, 15, 18 and 19 are reserved (2.1's humidity, headroom and
+ * per-sensor heart rates) and ignored.
  */
 export function decodeFrame(src) {
   const v = src instanceof DataView ? src
@@ -90,7 +89,6 @@ export function decodeFrame(src) {
   const u  = (o, scale, none) => { const x = v.getUint8(o); return x === none ? null : x / scale; };
   const st = v.getUint8(5);
   const flags = v.getUint16(6, true);
-  const evap = v.getInt8(15);
   const rf = reasonFlag(flags);
 
   return {
@@ -103,16 +101,12 @@ export function decodeFrame(src) {
     flags,
     reasonFlag:      rf,
     reason:          rf ? FLAG_TEXT[rf] : '',
-    hr:              u(8, 1, 0),              // fused bpm
+    hr:              u(8, 1, 0),              // bpm
     hrQuality:       v.getUint8(9),           // HRQ.*
     skin:            c(10),
-    microC:          c(12),
-    microRh:         u(14, 2, 255),
-    evapKpa:         evap === -128 ? null : evap / 20,
+    airC:            c(12),                   // air thermistor, outside the strap
     battery:         u(16, 1, 255),           // null = on USB power (always, on the power-bank build)
     activity:        u(17, 500, 255),         // g
-    hrA:             u(18, 1, 0),
-    hrB:             u(19, 1, 0),
   };
 }
 
@@ -143,12 +137,12 @@ export function encodeFrame(f) {
   b[8] = _u8(f.hr, 1, 0);
   b[9] = f.hrQuality ?? HRQ.NONE;
   v.setInt16(10, _centi(f.skin), true);
-  v.setInt16(12, _centi(f.microC), true);
-  b[14] = _u8(f.microRh, 2, 255);
-  v.setInt8(15, _none(f.evapKpa) ? -128 : Math.max(-127, Math.min(127, _roundf(f.evapKpa * 20))));
+  v.setInt16(12, _centi(f.airC), true);
+  b[14] = 255;                    // reserved (was humidity)
+  v.setInt8(15, -128);            // reserved (was evaporative headroom)
   b[16] = _none(f.battery) ? 255 : f.battery;
   b[17] = _u8(f.activity, 500, 255);
-  b[18] = _u8(f.hrA, 1, 0);
-  b[19] = _u8(f.hrB, 1, 0);
+  b[18] = 0;                      // reserved (was HR sensor A)
+  b[19] = 0;                      // reserved (was HR sensor B)
   return b;
 }

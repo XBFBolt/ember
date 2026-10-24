@@ -11,7 +11,7 @@ WHAT THE CASE HOUSES, BOTTOM TO TOP
   protoboard     70 x 50 x 1.6 on four posts, shifted 1.5 mm toward the USB end
   DevKitC-1      soldered straight into the protoboard (2.5 mm header spacer),
                  USB end facing -X, J1 header on the inner (+Y) side
-  outside        2 x pulse sensor and the SHT40, on leads through the +Y slot
+  outside        the pulse sensor and the air thermistor, on leads through the +Y slot
   in the floor   2 x thermistor bead, through the windows in the end pads
   power          a USB cable from the power bank into the notch at -X
 

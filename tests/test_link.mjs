@@ -51,12 +51,12 @@ Object.defineProperty(globalThis, 'navigator', {
 
 const ds  = await import('../webapp/src/lib/datastore.js');
 const dev = await import('../webapp/src/lib/device.js');
-const { encodeFrame, STATE, FLAG, UUID, BLE_NAME } = await import('../webapp/src/lib/frame.js');
+const { encodeFrame, STATE, FLAG, HRQ, UUID, BLE_NAME } = await import('../webapp/src/lib/frame.js');
 const { stopSimulation } = await import('../webapp/src/lib/sim.js');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const frame = (core, extra = {}) => encodeFrame({
-  core, half: core === null ? null : 0.68, state: STATE.OK, flags: 0, hr: 120, hrQuality: 2, ...extra,
+  core, half: core === null ? null : 0.68, state: STATE.OK, flags: 0, hr: 120, hrQuality: HRQ.OK, ...extra,
 });
 
 test('Bluetooth: connect, frames, command, drop, reconnect, disconnect', async () => {

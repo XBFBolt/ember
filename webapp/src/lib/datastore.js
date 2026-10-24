@@ -14,8 +14,6 @@ import { STATE, FLAG } from './frame.js';
 export const THRESHOLDS = {
   WATCH_C:          38.0,
   ACT_NOW_C:        38.5,
-  EVAP_CRITICAL:    0.8,   // kPa — sweat cannot evaporate
-  EVAP_AMPLE:       2.5,   // kPa — plenty of cooling capacity
   CT_MIN:           35.0,
   CT_MAX:           41.5,
 };
@@ -66,17 +64,15 @@ function _statusFor(fwState, core) {
 const PULSE_HOLD_MS = 10_000;
 let _lastPulseMs = null;
 
-function _netDoubts(flags) {
+function _doubts(flags) {
   let d = 0;
   if (flags & FLAG.MOTIONLESS_TACHY) d++;
-  if (flags & FLAG.NO_THERMAL_LOAD)  d++;
   if (flags & FLAG.COOL_SKIN)        d++;
-  if (flags & FLAG.EVAP_FAILING)     d--;
   return d;
 }
 
 function _isStarting(core, flags, t) {
-  return core === null && (flags & FLAG.STALE_HR) !== 0 && _netDoubts(flags) < 2 &&
+  return core === null && (flags & FLAG.STALE_HR) !== 0 && _doubts(flags) < 2 &&
     _lastPulseMs !== null && t - _lastPulseMs <= PULSE_HOLD_MS;
 }
 
@@ -122,18 +118,14 @@ function _emptyLatest() {
   return {
     timestampMs:  null,  // arrival time (data clock)
     seq:          null,
-    hr:           null,  // fused bpm
-    hrQuality:    null,  // HRQ.* (0 none, 1 single, 2 both agree, 3 disagree)
-    hrA:          null,
-    hrB:          null,
+    hr:           null,  // bpm
+    hrQuality:    null,  // HRQ.* (0 none, 1 ok)
     ctEst:        null,  // °C, null when the device withholds it
     half:         null,  // calibrated ± °C, null when missing (never made up)
     ctLo:         null,  // ctEst − half
     ctHi:         null,  // ctEst + half
     skinC:        null,
-    microC:       null,
-    microRh:      null,
-    evapKpa:      null,  // kept for the record; never shown (no kPa on screen)
+    airC:         null,  // air thermistor outside the strap (environment, not body data)
     activity:     null,  // g
     fwState:      null,  // STATE.* (0 OK, 1 CAUTION, 2 REFUSE)
     flags:        null,  // 16-bit
@@ -293,16 +285,12 @@ export function ingestFrame(f, t = Date.now()) {
     seq:         f.seq ?? null,
     hr,
     hrQuality:   f.hrQuality ?? null,
-    hrA:         _num(f.hrA),
-    hrB:         _num(f.hrB),
     ctEst:       core,
     half,
     ctLo:        half === null ? null : core - half,
     ctHi:        half === null ? null : core + half,
     skinC:       _num(f.skin),
-    microC:      _num(f.microC),
-    microRh:     _num(f.microRh),
-    evapKpa:     _num(f.evapKpa),
+    airC:        _num(f.airC),
     activity:    _num(f.activity),
     fwState,
     flags,

@@ -1,6 +1,6 @@
 # Ember TODO
 
-**Hardware is now v2** (`ember_v2` package): two chest pulse sensors, two skin thermistors, SHT40 outside the case, IMU, ESP32-S3, power bank, **Bluetooth to the app**. No Polar, no OLED, no buzzer, no USB-serial in the worn demo.
+**Hardware is now v5** (`wiring_v5.html`): one chest pulse sensor, two skin thermistors, one air thermistor outside the strap, IMU, ESP32-S3, power bank, **Bluetooth to the app**. The SHT40 and the second pulse sensor are gone (firmware 2.2, Phase 3b). No Polar, no OLED, no buzzer, no USB-serial in the worn demo.
 
 Order: 1. Interface (done) → 2. Data → 3. Firmware v2 fixes → 4. Hookup → 5. Demo safety net → 6. Ethics and story → 7. Freeze and present.
 **Software** = Dillon. **Hardware** = team, following the v2 build guide (P0–P9).
@@ -111,6 +111,7 @@ The range under-covers when core rises fast (84.9%) and at true core ≥ 38.5 (6
 - **Tried, doesn't help:** a separate ± while the estimate is rising. Rising coverage stayed at about 85% or dropped to 80%. The estimate isn't rising fast at the moments the truth is.
 - **Helps a little:** a lopsided range, since misses are almost always on the high side: about 0.3° below the estimate and 0.85° above, instead of ± 0.7. Rising coverage 85.6%, coverage at ≥ 38.5 went from 67% to 73%, and the range is narrower overall. Cost: the device sends a low and a high instead of one ± (firmware, BLE frame, app).
 - **The real fix is the lag itself**, in the filter, not the range. Out of scope for the hackathon.
+- **Learned correction (Oct 24, `analysis/learned_correction.py` → `learned_correction_results.txt`):** a ridge model on heart-rate features only (filter output, HR history, resting HR from BASELINE) added to ECTemp, same LOSO and 6-strata conformal. RMSE 0.41 → 0.31, range ±0.67 → ±0.50 at 90% coverage, Watch on at true 38.5 in 65/73 (was 47), Watch never fired 0 (was 5), Act now never fired 25 (was 34), false Act now trials 14 (was 13). Men vs women bias unchanged (−0.08) but the CI is now [−0.17, +0.01]. Not shipped; decide before porting to firmware + webapp + slides.
 
 ## Phase 3 · Firmware v2 fixes (tonight, before the team flashes)
 
@@ -138,6 +139,25 @@ Done Oct 24: v2 copied in, `firmware/ember_firmware.ino` deleted, and the real P
   - Firmware: no skin doubts until `CAL` has run. Cost: on an uncalibrated unit, "coffee at a desk" is one doubt (Low confidence), not two (Cannot estimate). `EVAP_FAILING` stays on.
   - Demo: `CAL` is a required step before recording or presenting (Phase 5 and 7), so the full Cannot estimate behaviour is live on stage.
 - [ ] Send the team the updated folder.
+
+## Phase 3b · Hardware v5: one pulse sensor, an air thermistor, no SHT40 (Oct 24)
+
+Wiring in `wiring_v5.html`, `ember_schematic_v5.png`, `ember_protoboard_v5.png`. Pulse sensor B is gone, GPIO5 now reads air thermistor C (R3, hangs outside the strap), and the SHT40 is gone, so there is no humidity. Firmware is **2.2**.
+
+- [x] **One pulse sensor.** `cadenceCheck()` takes one channel (jump test only; the "other sensor disagrees" test is gone), `fuseHr()` became `heartRateOf()`. HR quality is 0 none / 1 ok. `PPG_SINGLE` would have held Low confidence all session on 2.1; 0x0100 and 0x0200 are now reserved, never set.
+  - The loss: nothing cross-checks the heart rate. Only the signal-quality gate and the cadence jump test are left, so step-ups or cycling (step rate far from heart rate) matter more for the demo.
+- [x] **No humidity.** Evaporative headroom is gone, so `NO_THERMAL_LOAD` (0x0002) and `EVAP_FAILING` (0x0080) are reserved, never set. Doubts left: high HR while still, cool skin. Cannot estimate from doubts now needs both; on stage it realistically comes only from a lost pulse.
+  - The app's "Your body is struggling to cool down" line and the EVAP doubt-cancel rule are gone.
+- [x] **Air thermistor** on GPIO5: frame bytes 12–13 (was microclimate °C), `NO_AIR` 0x1000 (was `NO_MICRO`) when it isn't reading. Display only. The Personal view shows "Air near you 24°C" on the weather line.
+- [x] **CAL without the SHT40:** `ntcCalibrate()` makes the three beads agree at room temperature (geometric mean of resistances, about ±0.6 °C absolute). Refuses if a bead is open, the beads are > 2.5 °C apart, or they agree on something that isn't room temperature (catches every fixed resistor being wrong). A board calibrated against the SHT40 under 2.1 keeps kA/kB and only calibrates C against them. New NVS keys `kC`, `calC`.
+- [x] **Frame layout unchanged;** bytes 14, 15, 18, 19 reserved and sent as "none". CSV is 19 columns: `ms,hr,sqi,hr_q,step_hz,act_g,skinA,skinB,skin,skin_q,air_c,vbat,ct_est,ct_lo,ct_hi,kalman_half,filter_step,state,flags`.
+- [x] Changed together: `ember_core.h`, `ember.ino`, `test_core.cpp`, `ember_ble.py`, `APP_INTERFACE.md`, `frame.js`, `serial.js`, `sim.js` (the Low confidence minute is now a cadence lock), `datastore.js`, `PersonalView.js`, `test_frame.mjs`, `test_link.mjs`, the steering file.
+  - Checks: 167 core tests, sketch type-check, `--selftest` (reason order matches), 21 node tests (new: CSV header checked against `ember.ino`, a 2.1 CSV row is rejected).
+- [ ] Build guide for v5 (`guide/phases.html`, `template.html`, `gen_diagrams.py`, `docs/BUILD_GUIDE.md`): BOM, pin table, wiring list, diagrams, expected `ID`/`SCAN`/`TEMP` output, the P6 CAL procedure, the "both pulse sensors AGREED" gates, `HEADROOM_*` tuning.
+- [ ] On the board: `SCAN` shows only 0x68; `TEMP` shows the air bead near room temperature; `CAL` passes; `ID` says v2.2.2 and "thermistor calibration: yes".
+  - [x] Oct 24: on the demo board the thermistors read colder when heated: all three dividers are built upside down (thermistor on the 3V3 side). Fixed in firmware, not rewired: **2.2.1** flipped the air bead, **2.2.2** also skin A and B. `NTC_A_ON_TOP`, `NTC_B_ON_TOP`, `NTC_C_ON_TOP` (all 1) in `ember.ino` flip them with `ntcNodeMv()` (11 new unit tests, 178 pass, compiles for the S3). Set one to 0 if that divider is ever rewired to match the diagram. Rerun `CAL` after flashing: the stored calibration was taken the old way round.
+  - Upside down, skin on the chest read below 28 °C, so skin always showed NONE before this fix. Recheck that `TEMP` shows `AGREED` on skin.
+- [ ] Later (after the hackathon): an air-based "no thermal load" / "struggling to cool down" using skin vs air. PROSPIE has ambient and chest-skin columns to set the thresholds; reuse bits 0x0002 / 0x0080.
 
 ## Phase 4 · Hookup: webapp ↔ device over Bluetooth (tonight, Sat)
 
@@ -198,6 +218,7 @@ The device sends one 20-byte frame a second over BLE (`docs/APP_INTERFACE.md`). 
 - [ ] **Replay mode:** record frames to a file (`ember_ble.py --csv`) and play them back in the webapp at 1× or 10×. Button in the connection menu.
   - Before anyone records: `ember_ble.py --csv` should also save the raw 20 bytes per row (hex), so replay runs through `decodeFrame()` like the device and the demo. It should also flush every row and reconnect after a drop.
   - Replay can be one more source in `device.js`, calling `ingestFrame(decodeFrame(bytes), t)` with its own clock, the same way `sim.js` does.
+  - [x] Oct 24, quick version (recording skipped): "Replay sample" in the connection menu plays `webapp/demo/resting_sample.csv` (the firmware's 19-column `START` CSV) at 1×, looping, through `csvLineToFrame` → `encodeFrame` → `decodeFrame` (`src/lib/replay.js`). Chip and hero say "Replay". The sample is **generated** (60 s, resting 20-year-old man, CAL and baseline done), not a recording: swap in a real `START` capture when there is one. No 10× yet.
 - [ ] Record 2–3 real sessions with the team: 5 min baseline, 12 min hard work, 10 min recovery. Keep the best one in `demo/`.
   - **Run `CAL` first** (build guide P6). `ID` must say "thermistor calibration: yes"; until then the skin checks are off and "Cannot estimate" can't fire on skin.
   - Pick hard work whose step rate is far from the heart rate: step-ups around 100/min, or cycling. Running puts cadence and heart rate both near 160, the case where pulse sensors are easiest to fool.
@@ -223,16 +244,16 @@ The device sends one 20-byte frame a second over BLE (`docs/APP_INTERFACE.md`). 
 - [ ] Backup video of the full demo; the replay file loaded and tested on the presenting laptop.
 - [ ] Rehearse twice, once with someone new; time it.
 - [ ] Presenting laptop: Chrome, Bluetooth on, webapp served locally, browser zoom set for the projector, notifications off.
-- [ ] Demo unit: `ID` shows firmware v2.1 and "thermistor calibration: yes". If not, run `CAL` (P6) before going on stage.
+- [ ] Demo unit: `ID` shows firmware v2.2 and "thermistor calibration: yes". If not, run `CAL` (P6) before going on stage.
 
 ## Hardware checkpoints the software depends on
 
 - [ ] Fri night: v2 compiles and flashes (P0); phone or laptop sees "Ember" frames.
-- [ ] Sat midday: breadboard gate passed (P2); both pulse sensors AGREED on fingertips.
+- [ ] Sat midday: breadboard gate passed (P2); the pulse sensor gives a steady heart rate (`HR` says OK) on a fingertip.
 - [ ] Sat afternoon: worn test passed (P7); baseline succeeds; first app connection (P8).
 - [ ] Sat afternoon, quick sanity check: pulse-sensor heart rate vs a smartwatch or a 30 s manual count, at rest and during work. Every 4 bpm off moves the estimate about 0.1 °C.
 - [ ] Sat evening: demo session recorded for replay.
 
 ## Cut list (if behind, cut from the top)
 
-Rising vs steady analysis → interpolated-cell count → live Coach/Supervisor → "2 sensors agree" display → break-schedule citation (label as placeholder). Never cut: Phase 3 safety fixes, Bluetooth hookup, replay mode, the results slide.
+Rising vs steady analysis → interpolated-cell count → live Coach/Supervisor → break-schedule citation (label as placeholder). Never cut: Phase 3 safety fixes, Bluetooth hookup, replay mode, the results slide.

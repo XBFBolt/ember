@@ -103,7 +103,7 @@ int main() {
       return p.vExcMv * r / (p.rFixed + r);
     };
     float rawErr = ntcTempC(vFor(skinT, 1.05f), 1.0f, p) - skinT;
-    // CAL at room temperature against the SHT40:
+    // One-point CAL at room temperature against a known reference:
     float rMeas = ntcResistance(vFor(trueT, 1.05f), p);
     float k = rMeas / ntcRFromTemp(trueT, p);
     float corrErr = ntcTempC(vFor(skinT, 1.05f), k, p) - skinT;
@@ -115,6 +115,89 @@ int main() {
     CHECK(isnan(ntcTempC(3299.0f, 1.0f, p)), "open thermistor reads NAN");
     CHECK(isnan(ntcTempC(3100.0f, 1.0f, p)), "open thermistor at the ADC ceiling reads NAN");
     CHECK(!isnan(ntcTempC(2025.0f, 1.0f, p)), "15 C still reads");
+
+    // A divider built upside down (3V3 -> thermistor -> node -> 10k -> GND).
+    auto vTop = [&](float t) {
+      float r = ntcRFromTemp(t, p);
+      return p.vExcMv * p.rFixed / (r + p.rFixed);
+    };
+    for (float t : {15.f, 21.f, 25.f, 33.f, 40.f}) {
+      float back = ntcTempC(ntcNodeMv(vTop(t), true, p), 1.0f, p);
+      CHECK(fabsf(back - t) < 0.01f, "upside-down divider round trip %.1f -> %.3f", t, back);
+    }
+    CHECK(ntcTempC(vTop(21.f), 1.0f, p) > 28.0f,
+          "upside-down divider read the standard way: 21 C shows as ~29 C");
+    CHECK(ntcTempC(ntcNodeMv(vTop(45.f), true, p), 1.0f, p) >
+          ntcTempC(ntcNodeMv(vTop(25.f), true, p), 1.0f, p), "upside-down: heat reads warmer");
+    CHECK(ntcNodeMv(1800.0f, false, p) == 1800.0f, "standard divider passes through");
+    CHECK(isnan(ntcNodeMv(NAN, true, p)), "no reading stays NAN");
+    CHECK(isnan(ntcTempC(ntcNodeMv(0.0f, true, p), 1.0f, p)), "upside-down open thermistor reads NAN");
+    CHECK(isnan(ntcTempC(ntcNodeMv(3100.0f, true, p), 1.0f, p)),
+          "upside-down shorted thermistor (ADC ceiling) reads NAN, not hot");
+  }
+
+  // ---------------------------------------- CAL with no reference sensor
+  {
+    NtcParams p;
+    auto vFor = [&](float t, float scale) {
+      float r = ntcRFromTemp(t, p) * scale;
+      return p.vExcMv * r / (p.rFixed + r);
+    };
+    const float room = 23.0f, skinT = 33.5f;
+    const float scale[3] = {1.05f, 0.96f, 1.02f};       // within the +/-5 % tolerance
+    float mv[3], k[3] = {1, 1, 1}, ref = NAN;
+    bool none[3] = {false, false, false};
+    for (int i = 0; i < 3; i++) mv[i] = vFor(room, scale[i]);
+
+    float rawSpread = 0;
+    for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++)
+      rawSpread = fmaxf(rawSpread, ntcTempC(vFor(skinT, scale[i]), 1.0f, p) - ntcTempC(vFor(skinT, scale[j]), 1.0f, p));
+    CHECK(ntcCalibrate(mv, 3, none, k, p, &ref) == CAL_OK, "three beads at one room temperature: CAL ok");
+    float lo = 1e9f, hi = -1e9f, worst = 0;
+    for (int i = 0; i < 3; i++) {
+      float t = ntcTempC(vFor(skinT, scale[i]), k[i], p);
+      lo = fminf(lo, t); hi = fmaxf(hi, t); worst = fmaxf(worst, fabsf(t - skinT));
+    }
+    printf("  shared CAL: beads %.2f C apart raw, %.3f C after; worst absolute error %.2f C\n",
+           rawSpread, hi - lo, worst);
+    CHECK(rawSpread > 1.5f, "the beads disagree out of the box (%.2f C)", rawSpread);
+    CHECK(hi - lo < 0.02f, "after CAL they agree at skin temperature (%.3f C)", hi - lo);
+    CHECK(worst < 0.6f, "absolute error is the averaged tolerance, %.2f C", worst);
+    CHECK(fabsf(ref - room) < 0.6f, "shared reference %.2f C near the true %.1f", ref, room);
+
+    // A board calibrated against the SHT40 under v2.1: A and B keep their
+    // scales, and the air bead is calibrated against them.
+    float kk[3] = {scale[0], scale[1], 1.0f};
+    bool keepSkin[3] = {true, true, false};
+    CHECK(ntcCalibrate(mv, 3, keepSkin, kk, p, &ref) == CAL_OK, "keep A/B, calibrate C: ok");
+    CHECK(kk[0] == scale[0] && kk[1] == scale[1], "kept beads untouched");
+    CHECK(fabsf(ref - room) < 0.01f, "reference is the kept beads' %.2f C", ref);
+    CHECK(fabsf(ntcTempC(vFor(skinT, scale[2]), kk[2], p) - skinT) < 0.02f,
+          "air bead now as accurate as the kept skin beads");
+
+    // One bead in a hand: refused, nothing written.
+    float mvHand[3] = {mv[0], mv[1], vFor(30.0f, scale[2])};
+    float k2[3] = {1, 1, 1};
+    CHECK(ntcCalibrate(mvHand, 3, none, k2, p, &ref) == CAL_BEADS_APART && k2[2] == 1.0f,
+          "beads at different temperatures -> refused, scales unchanged");
+    // A bead unplugged.
+    float mvOpen[3] = {mv[0], 3200.0f, mv[2]};
+    CHECK(ntcCalibrate(mvOpen, 3, none, k2, p, &ref) == CAL_OPEN_OR_SHORT, "open bead -> refused");
+    // Every divider built with 4.7k instead of 10k: the beads agree, on ~8 C.
+    NtcParams wrong = p; wrong.rFixed = 4700.0f;
+    float mvWrong[3];
+    for (int i = 0; i < 3; i++) {
+      float r = ntcRFromTemp(room, p) * scale[i];
+      mvWrong[i] = p.vExcMv * r / (wrong.rFixed + r);
+    }
+    CHECK(ntcCalibrate(mvWrong, 3, none, k2, p, &ref) == CAL_NOT_ROOM && k2[0] == 1.0f,
+          "all fixed resistors wrong -> 'not room temperature' (%.1f C), unchanged", ref);
+  }
+
+  // -------------------------------------------------------- air bead
+  {
+    CHECK(airTemp(22.4f) == 22.4f && airTemp(-5.0f) == -5.0f && airTemp(45.0f) == 45.0f, "air in range");
+    CHECK(isnan(airTemp(NAN)) && isnan(airTemp(-20.0f)) && isnan(airTemp(60.0f)), "air out of range -> none");
   }
 
   // -------------------------------------------------------- skin fusion
@@ -127,16 +210,6 @@ int main() {
     CHECK(s.q == SKIN_SINGLE && fabsf(s.tC - 33.2f) < 1e-4f, "bead off skin -> single");
     s = fuseSkin(NAN, 22.0f);
     CHECK(s.q == SKIN_NONE && isnan(s.tC), "no skin");
-  }
-
-  // ---------------------------------------------------- psychrometrics
-  {
-    float h = evaporativeHeadroom(34.0f, 30.0f, 50.0f);
-    float expect = satVapourKpa(34.0f) - 0.5f * satVapourKpa(30.0f);
-    CHECK(fabsf(h - expect) < 1e-5f && h > 3.0f && h < 3.4f, "headroom 34/30/50 = %.3f kPa", h);
-    float sat = evaporativeHeadroom(34.0f, 34.0f, 100.0f);
-    CHECK(fabsf(sat) < 1e-5f, "saturated microclimate at skin temp = zero headroom");
-    CHECK(fabsf(satVapourKpa(20.0f) - 2.338f) < 0.01f, "es(20 C) = %.3f kPa", satVapourKpa(20.0f));
   }
 
   // ------------------------------------------------- heart rate by ACF
@@ -153,8 +226,8 @@ int main() {
 
     // The property that matters: across a grid of heart rates, noise
     // levels and heavy breathing, the channel is either RIGHT or it
-    // REJECTS itself. Rejected is fine - the other sensor or a coasting
-    // filter covers it. Confidently wrong is the failure mode.
+    // REJECTS itself. Rejected is fine - the filter coasts through it.
+    // Confidently wrong is the failure mode.
     {
       int tot = 0, acc = 0, wrong = 0;
       for (float hr = 45; hr <= 190; hr += 5)
@@ -217,41 +290,28 @@ int main() {
            60 * p.freqHz, p.sqi, cad.freqHz, 60 * cad.freqHz, cad.sqi);
     CHECK(fabsf(cad.freqHz - stepHz) < 0.1f, "cadence found: %.2f Hz", cad.freqHz);
     CHECK(fabsf(60 * p.freqHz - 60 * stepHz) < 4.f, "optical channel locked onto the bounce");
-    const Channel none = { NAN, 0.f, false };
 
-    // A minute ago the fused heart rate was 110: this channel JUMPED to cadence.
-    Channel c = judgeChannel(p, false), o = none;
+    // A minute ago the heart rate was 110: the channel JUMPED to cadence.
+    Channel c = judgeChannel(p, false);
     CHECK(!isnan(c.hr), "the bounce passes the channel's own quality checks (sqi %.2f)", c.sqi);
-    cadenceCheck(c, o, cad.freqHz, true, 110.f);
+    cadenceCheck(c, cad.freqHz, true, 110.f);
     CHECK(c.cadenceLocked && isnan(c.hr), "jump to cadence (110 last minute) is rejected");
+    CHECK(heartRateOf(c).q == HRQ_NONE && isnan(heartRateOf(c).hr), "rejected -> no heart rate this second");
 
     // No last minute to compare with: bounce and heart look the same. Reject.
-    c = judgeChannel(p, false); o = none;
-    cadenceCheck(c, o, cad.freqHz, true, NAN);
+    c = judgeChannel(p, false);
+    cadenceCheck(c, cad.freqHz, true, NAN);
     CHECK(c.cadenceLocked && isnan(c.hr), "at cadence with no previous minute -> rejected");
 
     // Not moving: the check does not apply.
-    c = judgeChannel(p, false); o = none;
-    cadenceCheck(c, o, cad.freqHz, false, 110.f);
+    c = judgeChannel(p, false);
+    cadenceCheck(c, cad.freqHz, false, 110.f);
     CHECK(!c.cadenceLocked && !isnan(c.hr), "not moving -> no cadence check");
 
-    // Two sensors bouncing together AGREE - which is exactly why the
-    // cadence check must happen before fusion:
-    Channel naiveA = { 60 * p.freqHz, p.sqi, false }, naiveB = { 60 * p.freqHz + 1, p.sqi, false };
-    CHECK(fuseHr(naiveA, naiveB).q == HRQ_AGREED, "two artifacts agree with each other");
-    cadenceCheck(naiveA, naiveB, cad.freqHz, true, 110.f);
-    CHECK(fuseHr(naiveA, naiveB).q == HRQ_NONE, "after the cadence check nothing passes");
-
-    // One sensor on the bounce, the other on the heart. Even with no jump
-    // (last minute 158), the bounce channel disagrees with the other one,
-    // so it goes and the heart channel stays.
-    auto heart = synthPpg(110, 20, 15.f, 0, 0, 12);
-    Channel onBounce = judgeChannel(p, false);
-    Channel onHeart = judgeChannel(lastWindow(heart, 100.f, 8.f, HR_MIN / 60.f, HR_MAX / 60.f), false);
-    cadenceCheck(onBounce, onHeart, cad.freqHz, true, 158.f);
-    Fused fz = fuseHr(onBounce, onHeart);
-    CHECK(onBounce.cadenceLocked && !onHeart.cadenceLocked, "bounce channel rejected, heart channel kept");
-    CHECK(fz.q == HRQ_SINGLE && fabsf(fz.hr - 110.f) < 3.f, "fused = the heart channel (%.1f)", fz.hr);
+    // No cadence found: nothing to compare with, the check stands down.
+    c = judgeChannel(p, false);
+    cadenceCheck(c, NAN, true, 110.f);
+    CHECK(!c.cadenceLocked && !isnan(c.hr), "no step rate -> no cadence check");
   }
 
   // ----------------------------- hard running: the heart IS at cadence
@@ -259,35 +319,32 @@ int main() {
     // 162 steps/min, and the heart has climbed to 162 as well, with a
     // little bounce on top. v2.0 threw this away for matching cadence.
     float stepHz = 2.7f;
-    auto ppgA = synthPpg(162, 20, 15.f, stepHz, 60.f, 21);
-    auto ppgB = synthPpg(162, 20, 15.f, stepHz, 60.f, 22);
-    Channel a = judgeChannel(lastWindow(ppgA, 100.f, 8.f, HR_MIN / 60.f, HR_MAX / 60.f), false);
-    Channel b = judgeChannel(lastWindow(ppgB, 100.f, 8.f, HR_MIN / 60.f, HR_MAX / 60.f), false);
-    printf("  hard running, heart at cadence: A %.1f  B %.1f  cadence %.1f /min\n", a.hr, b.hr, 60 * stepHz);
-    CHECK(fabsf(a.hr - 60 * stepHz) <= CADENCE_LOCK_BPM && fabsf(b.hr - 60 * stepHz) <= CADENCE_LOCK_BPM,
-          "both channels sit on the cadence (%.1f, %.1f)", a.hr, b.hr);
-    Channel a2 = a, b2 = b;
-    cadenceCheck(a, b, stepHz, true, 158.f);
-    Fused fz = fuseHr(a, b);
-    CHECK(!a.cadenceLocked && !b.cadenceLocked, "real running HR at cadence, no jump -> kept");
-    CHECK(fz.q == HRQ_AGREED && fabsf(fz.hr - 162.f) < 4.f, "fused %.1f AGREED", fz.hr);
+    auto ppg = synthPpg(162, 20, 15.f, stepHz, 60.f, 21);
+    Channel a = judgeChannel(lastWindow(ppg, 100.f, 8.f, HR_MIN / 60.f, HR_MAX / 60.f), false);
+    printf("  hard running, heart at cadence: %.1f  cadence %.1f /min\n", a.hr, 60 * stepHz);
+    CHECK(fabsf(a.hr - 60 * stepHz) <= CADENCE_LOCK_BPM, "the channel sits on the cadence (%.1f)", a.hr);
+    Channel a2 = a;
+    cadenceCheck(a, stepHz, true, 158.f);
+    HeartRate h = heartRateOf(a);
+    CHECK(!a.cadenceLocked, "real running HR at cadence, no jump -> kept");
+    CHECK(h.q == HRQ_OK && fabsf(h.hr - 162.f) < 4.f, "heart rate %.1f", h.hr);
 
     // The same reading after a minute at 120: a 40 bpm jump is what a
     // bounce looks like, so it is rejected.
-    cadenceCheck(a2, b2, stepHz, true, 120.f);
-    CHECK(fuseHr(a2, b2).q == HRQ_NONE, "same reading after a 40 bpm jump -> rejected");
+    cadenceCheck(a2, stepHz, true, 120.f);
+    CHECK(heartRateOf(a2).q == HRQ_NONE, "same reading after a 40 bpm jump -> rejected");
 
     // The edge of the jump window, exactly.
-    Channel x = { 160, .9f, false }, y = { NAN, 0, false };
-    cadenceCheck(x, y, stepHz, true, 160.f - CADENCE_JUMP_BPM);
+    Channel x = { 160, .9f, false };
+    cadenceCheck(x, stepHz, true, 160.f - CADENCE_JUMP_BPM);
     CHECK(!isnan(x.hr), "15 bpm from last minute -> kept");
     x = { 160, .9f, false };
-    cadenceCheck(x, y, stepHz, true, 160.f - CADENCE_JUMP_BPM - 1.f);
+    cadenceCheck(x, stepHz, true, 160.f - CADENCE_JUMP_BPM - 1.f);
     CHECK(isnan(x.hr) && x.cadenceLocked, "16 bpm from last minute -> rejected");
 
     // A channel NOT at cadence is never touched, whatever last minute was.
     x = { 120, .9f, false };
-    cadenceCheck(x, y, stepHz, true, NAN);
+    cadenceCheck(x, stepHz, true, NAN);
     CHECK(x.hr == 120 && !x.cadenceLocked, "off-cadence channel untouched");
   }
 
@@ -295,15 +352,15 @@ int main() {
   {
     // Heart and steps both at 162. One minute of the firmware's loop:
     // noisySeconds of junk first, then clean seconds at the heart rate.
-    // Returns the minute's mean fused HR, or NAN if the minute was lost.
+    // Returns the minute's mean HR, or NAN if the minute was lost.
     auto minute = [](HrReference &ref, int noisySeconds) {
       double sum = 0; int n = 0;
       for (int s = 0; s < 60; s++) {
-        Channel a = { NAN, .2f, false }, b = { NAN, .2f, false };
-        if (s >= noisySeconds) { a = { 162.f, .9f, false }; b = { 163.f, .9f, false }; }
-        cadenceCheck(a, b, 2.7f, true, ref.hr);
-        Fused f = fuseHr(a, b);
-        if (!isnan(f.hr)) { sum += f.hr; n++; }
+        Channel c = { NAN, .2f, false };
+        if (s >= noisySeconds) c = { 162.f, .9f, false };
+        cadenceCheck(c, 2.7f, true, ref.hr);
+        HeartRate h = heartRateOf(c);
+        if (!isnan(h.hr)) { sum += h.hr; n++; }
       }
       float mean = n >= MIN_GOOD_SEC_PER_MINUTE ? (float)(sum / n) : NAN;
       ref.endMinute(mean);
@@ -338,54 +395,48 @@ int main() {
     CHECK(r.hr == 140.f && r.lostMinutes == 0, "a good minute resets it");
   }
 
-  // ---------------------------------------------------------- fusion
+  // ------------------------------------------------- one-sensor heart rate
   {
-    Channel a = {100, .9f, false}, b = {103, .8f, false}, far = {125, .9f, false}, none = {NAN, .2f, false};
-    CHECK(fuseHr(a, b).q == HRQ_AGREED && fabsf(fuseHr(a, b).hr - 101.5f) < 1e-4f, "agree");
-    CHECK(fuseHr(a, far).q == HRQ_DISAGREE && isnan(fuseHr(a, far).hr), "disagree -> no HR");
-    CHECK(fuseHr(a, none).q == HRQ_SINGLE, "single");
-    CHECK(fuseHr(none, none).q == HRQ_NONE, "none");
-    Channel hi1 = {170, .9f, false}, hi2 = {179, .9f, false};
-    CHECK(fuseHr(hi1, hi2).q == HRQ_AGREED, "6%% tolerance at high HR (9 bpm at 175)");
+    Channel good = {100, .9f, false}, none = {NAN, .2f, false};
+    CHECK(heartRateOf(good).q == HRQ_OK && heartRateOf(good).hr == 100.f, "good channel -> HR, quality OK");
+    CHECK(heartRateOf(none).q == HRQ_NONE && isnan(heartRateOf(none).hr), "rejected channel -> none");
   }
 
   // -------------------------------------------------- states and flags
   {
     Inputs base{};
     base.ctEst = 37.6f;
-    base.hr = 120; base.hrQ = HRQ_AGREED; base.cadenceLockSeen = false;
+    base.hr = 120; base.cadenceLockSeen = false;
     base.coastMinutes = 0; base.everUpdated = true;
-    base.skinC = 34.5f; base.skinQ = SKIN_AGREED; base.headroom = 1.5f;
-    base.haveMicro = true; base.haveImu = true; base.activityG = 0.2f; base.secSinceMoving = 0;
+    base.skinC = 34.5f; base.skinQ = SKIN_AGREED;
+    base.haveAir = true; base.haveImu = true; base.activityG = 0.2f; base.secSinceMoving = 0;
     base.baselineValid = true;
     base.baselineRunning = false; base.restHr = 65; base.calibrated = true;
     base.lowBatt = false;
     auto stateOf = [](const Inputs &i) { return stateFromFlags(confoundFlags(i), i.ctEst); };
 
     Inputs in = base;
-    CHECK(stateOf(in) == STATE_OK, "working in heat -> OK");
+    CHECK(stateOf(in) == STATE_OK, "working in heat, one good pulse sensor -> OK");
 
-    // An hour at a desk, heart rate up from coffee, skin cool, dry air.
+    // An hour at a desk in a cool room, heart rate up from coffee, skin cool.
     Inputs desk = base;
-    desk.activityG = 0.01f; desk.secSinceMoving = 3600; desk.skinC = 32.0f; desk.headroom = 3.0f;
+    desk.activityG = 0.01f; desk.secSinceMoving = 3600; desk.skinC = 30.5f;
     uint16_t f = confoundFlags(desk);
-    CHECK((f & F_MOTIONLESS_TACHY) && (f & F_NO_THERMAL_LOAD), "coffee at a desk raises two doubts");
-    CHECK(stateOf(desk) == STATE_REFUSE, "coffee at a desk -> REFUSE (%s)", flagReason(f));
+    CHECK((f & F_MOTIONLESS_TACHY) && (f & F_COOL_SKIN), "coffee at a desk, cool skin: two doubts");
+    CHECK(stateOf(desk) == STATE_REFUSE, "coffee at a desk, cool skin -> REFUSE (%s)", flagReason(f));
+
+    // The same desk with skin at 32: one doubt. (v2.1 also had "no thermal
+    // load" from dry air here, which took it to REFUSE; that needed humidity.)
+    in = desk; in.skinC = 32.0f;
+    CHECK(stateOf(in) == STATE_CAUTION, "coffee at a desk, skin 32 C: one doubt -> CAUTION");
 
     in = base; in.activityG = 0.01f; in.secSinceMoving = 3600;
     CHECK(stateOf(in) == STATE_CAUTION, "still for an hour but hot skin -> CAUTION");
-
-    in = base; in.activityG = 0.01f; in.secSinceMoving = 3600; in.headroom = 0.4f;
-    f = confoundFlags(in);
-    CHECK((f & F_EVAP_FAILING) && stateOf(in) == STATE_OK,
-          "still, but sweat cannot evaporate: heat corroborated -> OK");
 
     in = base; in.coastMinutes = 2;
     CHECK(stateOf(in) == STATE_REFUSE, "2 min without HR -> REFUSE");
     in = base; in.everUpdated = false;
     CHECK(stateOf(in) == STATE_REFUSE, "never updated -> REFUSE");
-    in = base; in.hrQ = HRQ_SINGLE;
-    CHECK(stateOf(in) == STATE_CAUTION, "one pulse sensor -> CAUTION");
     CHECK(coastInflation(0) == 0 && coastInflation(4) > 0.07f && coastInflation(4) < 0.075f,
           "coast inflation after 4 min = %.3f C", coastInflation(4));
 
@@ -400,12 +451,14 @@ int main() {
     in.ctEst = NAN;
     CHECK(stateOf(in) == STATE_REFUSE, "3 min without HR, no estimate -> REFUSE");
 
-    in = base; in.ctEst = 38.3f; in.skinC = 30.5f; in.headroom = 3.0f;   // cold wind on the chest
-    f = confoundFlags(in);
-    CHECK((f & F_NO_THERMAL_LOAD) && (f & F_COOL_SKIN), "cool skin and dry air: two doubts");
-    CHECK(stateOf(in) == STATE_CAUTION, "two doubts at 38.3 -> CAUTION, not REFUSE");
-    in.ctEst = 37.9f;
-    CHECK(stateOf(in) == STATE_REFUSE, "the same two doubts at 37.9 -> REFUSE");
+    // Two doubts never refuse at Watch. (Up there the stillness doubt does
+    // not fire, so check the rule on the flags directly.)
+    CHECK(stateFromFlags(F_MOTIONLESS_TACHY | F_COOL_SKIN, 38.3f) == STATE_CAUTION,
+          "two doubts at 38.3 -> CAUTION, not REFUSE");
+    CHECK(stateFromFlags(F_MOTIONLESS_TACHY | F_COOL_SKIN, 37.9f) == STATE_REFUSE,
+          "the same two doubts at 37.9 -> REFUSE");
+    in = base; in.ctEst = 38.3f; in.skinC = 30.5f;          // cold wind on the chest
+    CHECK(stateOf(in) == STATE_CAUTION && (confoundFlags(in) & F_COOL_SKIN), "cool skin at 38.3 -> CAUTION");
 
     in = base; in.ctEst = 38.2f; in.coastMinutes = 2;
     f = confoundFlags(in);
@@ -444,26 +497,33 @@ int main() {
     CHECK(!(confoundFlags(in) & F_MOTIONLESS_TACHY), "no IMU: no TACHY, whatever the heart rate");
     CHECK(stateOf(in) == STATE_OK, "no IMU, working hard in heat -> OK");
 
-    Inputs cool = desk; cool.secSinceMoving = 300;   // recovering with cool skin in dry air
+    Inputs cool = desk; cool.secSinceMoving = 300;   // recovering with cool skin
     f = confoundFlags(cool);
     CHECK(!(f & F_MOTIONLESS_TACHY) && stateOf(cool) == STATE_CAUTION,
-          "5 min into recovery, cool skin, dry air: one doubt -> CAUTION, not REFUSE");
+          "5 min into recovery, cool skin: one doubt -> CAUTION, not REFUSE");
     cool.secSinceMoving = 3600; cool.ctEst = 38.1f;
     f = confoundFlags(cool);
     CHECK(!(f & F_MOTIONLESS_TACHY) && stateOf(cool) == STATE_CAUTION,
           "still for an hour at 38.1: no TACHY -> CAUTION");
 
-    // ------------------- width-based refusal removed, 0x0010 reserved
+    // ------------------- reserved bits: 0x0010 (v2.0), and v2.1's humidity
+    // and two-sensor flags
     {
-      bool any = false;
+      const uint16_t RESERVED = F_RESERVED_0002 | F_RESERVED_0010 | F_RESERVED_0080 |
+                                F_RESERVED_0100 | F_RESERVED_0200;
+      uint16_t seen = 0;
       for (const Inputs &c0 : {base, desk, rec, cool})
         for (int m : {0, 1, 2, 10, 60})
-          for (float ct : {35.0f, 37.0f, 37.9f, 38.0f, 38.5f, 41.5f}) {
-            Inputs c = c0; c.coastMinutes = m; c.ctEst = ct;
-            any |= (confoundFlags(c) & F_RESERVED_0010) != 0;
-          }
-      CHECK(!any, "bit 0x0010 is never set");
-      CHECK(flagReason(F_RESERVED_0010)[0] == '\0', "reserved bit has no reason text");
+          for (float ct : {35.0f, 37.0f, 37.9f, 38.0f, 38.5f, 41.5f})
+            for (bool air : {true, false})
+              for (float hr : {NAN, 70.f, 160.f}) {
+                Inputs c = c0; c.coastMinutes = m; c.ctEst = ct; c.haveAir = air; c.hr = hr;
+                c.cadenceLockSeen = m == 1; c.skinQ = m == 2 ? SKIN_DISAGREE : SKIN_SINGLE;
+                c.calibrated = m != 10; c.lowBatt = m == 60;
+                seen |= confoundFlags(c);
+              }
+      CHECK(!(seen & RESERVED), "reserved bits are never set (saw 0x%04X)", seen & RESERVED);
+      CHECK(flagReason(RESERVED)[0] == '\0', "reserved bits have no reason text");
       in = base; in.ctEst = 38.5f; in.coastMinutes = 60;
       CHECK(stateOf(in) == STATE_CAUTION && fabsf(coastInflation(60) - 0.280f) < 0.002f,
             "an hour of coasting at 38.5: +/- grows to %.2f, number kept",
@@ -474,32 +534,30 @@ int main() {
     in = base; in.calibrated = false;
     CHECK(stateOf(in) == STATE_OK, "uncalibrated thermistors -> OK");
 
-    // Uncalibrated beads reading low in a cool, dry room: no skin doubts.
-    in = base; in.calibrated = false; in.skinC = 30.0f; in.headroom = 3.0f;
+    // Uncalibrated beads reading low in a cool room: no skin doubt.
+    in = base; in.calibrated = false; in.skinC = 30.0f;
     f = confoundFlags(in);
-    CHECK(!(f & (F_NO_THERMAL_LOAD | F_COOL_SKIN)) && stateOf(in) == STATE_OK,
-          "uncalibrated, skin reads 30 C, dry air: no skin doubts -> OK");
+    CHECK(!(f & F_COOL_SKIN) && stateOf(in) == STATE_OK,
+          "uncalibrated, skin reads 30 C: no skin doubt -> OK");
     in.calibrated = true;
     f = confoundFlags(in);
-    CHECK((f & F_NO_THERMAL_LOAD) && (f & F_COOL_SKIN) && stateOf(in) == STATE_REFUSE,
-          "the same once calibrated: both skin doubts -> REFUSE");
+    CHECK((f & F_COOL_SKIN) && stateOf(in) == STATE_CAUTION,
+          "the same once calibrated: the skin doubt -> CAUTION");
     // The cost: coffee at a desk on an uncalibrated unit is one doubt, not two.
     in = desk; in.calibrated = false;
     f = confoundFlags(in);
-    CHECK((f & F_MOTIONLESS_TACHY) && !(f & F_NO_THERMAL_LOAD) && stateOf(in) == STATE_CAUTION,
+    CHECK((f & F_MOTIONLESS_TACHY) && !(f & F_COOL_SKIN) && stateOf(in) == STATE_CAUTION,
           "coffee at a desk, uncalibrated -> CAUTION only (run CAL before the demo)");
-    // Sweat-cannot-evaporate still works uncalibrated.
-    in = base; in.calibrated = false; in.headroom = 0.4f;
-    CHECK(confoundFlags(in) & F_EVAP_FAILING, "uncalibrated: EVAP_FAILING still fires");
-    in = base; in.haveMicro = false; in.headroom = NAN;
-    CHECK(stateOf(in) == STATE_OK, "no SHT40 -> OK");
+    in = base; in.haveAir = false;
+    f = confoundFlags(in);
+    CHECK((f & F_NO_AIR) && stateOf(in) == STATE_OK, "no air thermistor -> OK, NO_AIR set");
     in = base; in.skinQ = SKIN_DISAGREE;
     CHECK(stateOf(in) == STATE_OK, "skin beads disagree -> OK");
     in = base; in.skinQ = SKIN_SINGLE;
     CHECK(stateOf(in) == STATE_OK, "one skin bead off -> OK");
     in = base; in.lowBatt = true;
     CHECK(stateOf(in) == STATE_OK, "low battery -> OK");
-    in = base; in.calibrated = false; in.haveMicro = false; in.headroom = NAN;
+    in = base; in.calibrated = false; in.haveAir = false;
     in.skinQ = SKIN_DISAGREE; in.lowBatt = true;
     CHECK(stateOf(in) == STATE_OK, "every info-only flag at once -> still OK");
     in.baselineValid = false;
@@ -507,8 +565,6 @@ int main() {
     CHECK(stateOf(in) == STATE_CAUTION && strcmp(flagReason(f), "no baseline yet") == 0,
           "CAUTION reason is the real one, not an info-only flag (%s)", flagReason(f));
 
-    in = base; in.hrQ = HRQ_DISAGREE;
-    CHECK(stateOf(in) == STATE_CAUTION, "pulse sensors disagree -> CAUTION");
     in = base; in.cadenceLockSeen = true;
     CHECK(stateOf(in) == STATE_CAUTION, "cadence lock seen -> CAUTION");
     in = base; in.baselineValid = false;
@@ -521,8 +577,8 @@ int main() {
   {
     // The strap slipped at 38.3: three minutes without a heart rate.
     Inputs in{};
-    in.ctEst = 38.3f; in.hr = NAN; in.hrQ = HRQ_NONE; in.coastMinutes = 3; in.everUpdated = true;
-    in.skinC = 35.0f; in.skinQ = SKIN_AGREED; in.headroom = 1.2f; in.haveMicro = true;
+    in.ctEst = 38.3f; in.hr = NAN; in.coastMinutes = 3; in.everUpdated = true;
+    in.skinC = 35.0f; in.skinQ = SKIN_AGREED; in.haveAir = true;
     in.haveImu = true; in.activityG = 0.2f; in.secSinceMoving = 0; in.baselineValid = true; in.restHr = 65;
     in.calibrated = true;
     uint16_t f = confoundFlags(in);
@@ -532,8 +588,8 @@ int main() {
     bool show = showsNumber(st, in.everUpdated);
     Frame fr{};
     fr.ctC = show ? in.ctEst : NAN; fr.halfC = show ? half : NAN; fr.state = st; fr.flags = f;
-    fr.hr = NAN; fr.skinC = fr.microC = fr.microRh = fr.headroomKpa = NAN;
-    fr.activityG = fr.hrA = fr.hrB = NAN; fr.battPct = 255;
+    fr.hr = NAN; fr.hrQ = HRQ_NONE; fr.skinC = fr.airC = NAN;
+    fr.activityG = NAN; fr.battPct = 255;
     uint8_t b[PACKET_LEN];
     encodeFrame(fr, b);
     CHECK(st == STATE_CAUTION && (f & F_STALE_HR), "stale HR at 38.3 -> CAUTION");
@@ -551,25 +607,26 @@ int main() {
   {
     Frame fr{};
     fr.seq = 513; fr.ctC = 37.84f; fr.halfC = 0.62f; fr.state = STATE_CAUTION;
-    fr.baselineRunning = false; fr.logging = true; fr.flags = F_PPG_SINGLE | F_NO_BASELINE;
-    fr.hr = 131.4f; fr.hrQ = HRQ_SINGLE; fr.skinC = 34.12f; fr.microC = 31.5f;
-    fr.microRh = 63.5f; fr.headroomKpa = 1.37f; fr.battPct = 81; fr.activityG = 0.21f;
-    fr.hrA = 131.4f; fr.hrB = NAN;
+    fr.baselineRunning = false; fr.logging = true; fr.flags = F_SKIN_SINGLE | F_NO_BASELINE;
+    fr.hr = 131.4f; fr.hrQ = HRQ_OK; fr.skinC = 34.12f; fr.airC = 22.5f;
+    fr.battPct = 81; fr.activityG = 0.21f;
     uint8_t b[PACKET_LEN];
     encodeFrame(fr, b);
     CHECK((b[0] | b[1] << 8) == 513, "seq");
     CHECK((int16_t)(b[2] | b[3] << 8) == 3784, "ct centi");
     CHECK(b[4] == 31, "half 0.62 -> 31 x 0.02");
     CHECK(b[5] == (1 | 0x20), "state byte");
-    CHECK((b[6] | b[7] << 8) == (F_PPG_SINGLE | F_NO_BASELINE), "flags");
+    CHECK((b[6] | b[7] << 8) == (F_SKIN_SINGLE | F_NO_BASELINE), "flags");
     CHECK(b[8] == 131 && b[9] == 1, "hr");
     CHECK((int16_t)(b[10] | b[11] << 8) == 3412, "skin");
-    CHECK(b[14] == 127, "rh 63.5 -> 127 x 0.5");
-    CHECK((int8_t)b[15] == 27, "headroom 1.37 -> 27 x 0.05 (%d)", (int8_t)b[15]);
-    CHECK(b[16] == 81 && b[17] == 105 && b[18] == 131 && b[19] == 0, "tail");
-    fr.ctC = NAN; fr.halfC = NAN; fr.headroomKpa = NAN;
+    CHECK((int16_t)(b[12] | b[13] << 8) == 2250, "air 22.5");
+    CHECK(b[14] == 255 && b[15] == 0x80, "reserved bytes 14-15 sent as 'not available'");
+    CHECK(b[16] == 81 && b[17] == 105, "battery, activity");
+    CHECK(b[18] == 0 && b[19] == 0, "reserved bytes 18-19 sent as 'not available'");
+    fr.ctC = NAN; fr.halfC = NAN; fr.airC = NAN;
     encodeFrame(fr, b);
-    CHECK((int16_t)(b[2] | b[3] << 8) == INT16_MIN && b[4] == 255 && b[15] == 0x80, "NAN sentinels");
+    CHECK((int16_t)(b[2] | b[3] << 8) == INT16_MIN && b[4] == 255 &&
+          (int16_t)(b[12] | b[13] << 8) == INT16_MIN, "NAN sentinels");
   }
 
   // ---------------------------------------------------------- battery

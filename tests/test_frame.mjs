@@ -2,7 +2,7 @@
 //  - frame.js: the same frames as `tools/ember_ble.py --selftest`, the firmware
 //    encoder's byte-exact frame from tests/test_core.cpp, and the flag bits,
 //    reason order and text against flagReason() in ember_core.h
-//  - serial.js: the 24-column bench CSV, including REFUSE withholding the number
+//  - serial.js: the 19-column bench CSV, including REFUSE withholding the number
 //  - datastore.js: Paused vs Starting, no gap-filling, never hidden at 38.0+
 //
 //   node --test tests/test_frame.mjs          (from ember/)
@@ -18,8 +18,8 @@ import {
 const close = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, `${msg}: ${a} vs ${b}`);
 
 // The frame tests/test_core.cpp encodes and ember_ble.py decodes.
-const FW_BYTES = Uint8Array.from([0x01, 0x02, 0xC8, 0x0E, 31, 0x21, 0x20, 0x02, 131, 1,
-  0x54, 0x0D, 0x4E, 0x0C, 127, 27, 81, 105, 131, 0]);
+const FW_BYTES = Uint8Array.from([0x01, 0x02, 0xC8, 0x0E, 31, 0x21, 0x20, 0x08, 131, 1,
+  0x54, 0x0D, 0xCA, 0x08, 255, 0x80, 81, 105, 0, 0]);
 
 test('decodes the self-test frame', () => {
   const d = decodeFrame(new DataView(FW_BYTES.buffer));
@@ -29,19 +29,16 @@ test('decodes the self-test frame', () => {
   assert.equal(d.state, STATE.CAUTION);
   assert.equal(d.logging, true);
   assert.equal(d.baselineRunning, false);
-  assert.equal(d.flags, FLAG.NO_BASELINE | FLAG.PPG_SINGLE);
+  assert.equal(d.flags, FLAG.NO_BASELINE | FLAG.SKIN_SINGLE);
   assert.equal(d.hr, 131);
-  assert.equal(d.hrQuality, HRQ.SINGLE);
+  assert.equal(d.hrQuality, HRQ.OK);
   close(d.skin, 34.12, 'skin');
-  close(d.microC, 31.50, 'micro');
-  assert.equal(d.microRh, 63.5);
-  close(d.evapKpa, 1.35, 'evap');
+  close(d.airC, 22.50, 'air');
   assert.equal(d.battery, 81);
   close(d.activity, 0.21, 'activity');
-  assert.equal(d.hrA, 131);
-  assert.equal(d.hrB, null);
-  assert.equal(d.reasonFlag, FLAG.PPG_SINGLE);
-  assert.equal(d.reason, 'one pulse sensor only');
+  assert.equal(d.reasonFlag, FLAG.NO_BASELINE);
+  assert.equal(d.reason, 'no baseline yet');
+  for (const k of ['microC', 'microRh', 'evapKpa', 'hrA', 'hrB']) assert.ok(!(k in d), `no ${k} (reserved in 2.2)`);
 });
 
 test('REFUSE frame: core and ± arrive blank', () => {
@@ -49,13 +46,13 @@ test('REFUSE frame: core and ± arrive blank', () => {
     0x00, 0x80, 0x00, 0x80, 255, 0x80, 255, 255, 0, 0]));
   assert.equal(e.core, null);
   assert.equal(e.half, null);
-  assert.equal(e.evapKpa, null);
   assert.equal(e.state, STATE.REFUSE);
   assert.equal(e.reason, 'no trustworthy heart rate');
   assert.equal(e.battery, null);
   assert.equal(e.hr, null);
+  assert.equal(e.hrQuality, HRQ.NONE);
   assert.equal(e.skin, null);
-  assert.equal(e.microRh, null);
+  assert.equal(e.airC, null);
   assert.equal(e.activity, null);
 });
 
@@ -71,10 +68,11 @@ test('at 38.0 and up a stale heart rate is CAUTION with the number', () => {
 test('an info-only flag never masks the reason', () => {
   const b = new Uint8Array(FRAME_LEN);
   b[5] = STATE.CAUTION;
-  new DataView(b.buffer).setUint16(6, FLAG.NO_BASELINE | FLAG.NOT_CALIBRATED | FLAG.NO_MICRO, true);
+  new DataView(b.buffer).setUint16(6, FLAG.NO_BASELINE | FLAG.NOT_CALIBRATED | FLAG.NO_AIR, true);
   assert.equal(decodeFrame(b).reason, 'no baseline yet');
   assert.equal(reasonFlag(0), 0);
-  assert.equal(reasonFlag(FLAG.EVAP_FAILING | FLAG.RESERVED_0010), 0);
+  assert.equal(reasonFlag(FLAG.RESERVED_0002 | FLAG.RESERVED_0010 | FLAG.RESERVED_0080 |
+    FLAG.RESERVED_0100 | FLAG.RESERVED_0200), 0, 'reserved bits give no reason');
 });
 
 test('baseline-running bit and short frames', () => {
@@ -90,29 +88,30 @@ test('baseline-running bit and short frames', () => {
 test('encoder matches the firmware byte for byte', () => {
   const f = {
     seq: 513, core: 37.84, half: 0.62, state: STATE.CAUTION, baselineRunning: false, logging: true,
-    flags: FLAG.PPG_SINGLE | FLAG.NO_BASELINE, hr: 131.4, hrQuality: HRQ.SINGLE, skin: 34.12,
-    microC: 31.5, microRh: 63.5, evapKpa: 1.37, battery: 81, activity: 0.21, hrA: 131.4, hrB: null,
+    flags: FLAG.SKIN_SINGLE | FLAG.NO_BASELINE, hr: 131.4, hrQuality: HRQ.OK, skin: 34.12,
+    airC: 22.5, battery: 81, activity: 0.21,
   };
   assert.deepEqual(Array.from(encodeFrame(f)), Array.from(FW_BYTES));
 
-  const blank = encodeFrame({ ...f, core: NaN, half: null, evapKpa: undefined });
+  const blank = encodeFrame({ ...f, core: NaN, half: null, airC: undefined });
   const v = new DataView(blank.buffer);
   assert.equal(v.getInt16(2, true), -32768);
   assert.equal(blank[4], 255);
-  assert.equal(blank[15], 0x80);
+  assert.equal(v.getInt16(12, true), -32768);
+  assert.deepEqual([blank[14], blank[15], blank[18], blank[19]], [255, 0x80, 0, 0], 'reserved bytes');
 });
 
 test('encode → decode round trip', () => {
   const f = {
     seq: 65535, core: 38.71, half: 0.86, state: STATE.CAUTION, baselineRunning: true, logging: false,
-    flags: FLAG.BASELINE_RUNNING | FLAG.NO_BASELINE | FLAG.EVAP_FAILING, hr: 162, hrQuality: HRQ.AGREED,
-    skin: 35.5, microC: 33.25, microRh: 91, evapKpa: -0.4, battery: null, activity: 0.5, hrA: 161, hrB: 163,
+    flags: FLAG.BASELINE_RUNNING | FLAG.NO_BASELINE | FLAG.NO_AIR, hr: 162, hrQuality: HRQ.OK,
+    skin: 35.5, airC: -3.25, battery: null, activity: 0.5,
   };
   const d = decodeFrame(encodeFrame(f));
-  for (const k of ['seq', 'state', 'baselineRunning', 'logging', 'flags', 'hr', 'hrQuality', 'microRh', 'battery', 'activity', 'hrA', 'hrB']) {
+  for (const k of ['seq', 'state', 'baselineRunning', 'logging', 'flags', 'hr', 'hrQuality', 'battery', 'activity']) {
     assert.equal(d[k], f[k], k);
   }
-  for (const k of ['core', 'half', 'skin', 'microC', 'evapKpa']) close(d[k], f[k], k);
+  for (const k of ['core', 'half', 'skin', 'airC']) close(d[k], f[k], k);
   assert.equal(d.reason, 'baseline in progress');
 });
 
@@ -129,37 +128,52 @@ test('flags, reason order and reason text match ember_core.h', () => {
   for (const [bit, text] of fw) assert.equal(FLAG_TEXT[bit], text, `0x${bit.toString(16)}`);
 });
 
-// ─── USB bench path: the 24-column CSV becomes the same frame shape ─────────
+// ─── USB bench path: the 19-column CSV becomes the same frame shape ─────────
 
-const { csvLineToFrame } = await import('../webapp/src/lib/serial.js');
+const { csvLineToFrame, CSV_HEADER } = await import('../webapp/src/lib/serial.js');
+
+test('CSV header matches the firmware', () => {
+  const ino = readFileSync(fileURLToPath(new URL('../firmware/ember/ember.ino', import.meta.url)), 'utf8');
+  let body = ino.slice(ino.indexOf('static void csvHeader()'));
+  body = body.slice(0, body.indexOf('\n}'));
+  const header = [...body.matchAll(/"([^"]*)"/g)].map(m => m[1]).join('');
+  assert.equal(header, CSV_HEADER);
+  assert.equal(CSV_HEADER.split(',').length, 19);
+});
 
 test('CSV row → frame (firmware printf format)', () => {
-  const f = csvLineToFrame('123456,131.2,0.81,nan,0.10,131.2,1,1.62,0.210,34.10,nan,34.10,2,' +
-    '31.50,63.5,1.370,0.00,37.840,37.220,38.460,0.900,1,1,0x0220');
+  const f = csvLineToFrame('123456,131.2,0.81,1,1.62,0.210,34.10,nan,34.10,1,22.50,0.00,' +
+    '37.840,37.220,38.460,0.900,1,1,0x0820');
   close(f.core, 37.84, 'core');
   close(f.half, 0.62, 'half (from ct_lo/ct_hi, never kalman_half)');
   assert.equal(f.state, STATE.CAUTION);
-  assert.equal(f.flags, FLAG.PPG_SINGLE | FLAG.NO_BASELINE);
-  assert.equal(f.reason, 'one pulse sensor only');
+  assert.equal(f.flags, FLAG.SKIN_SINGLE | FLAG.NO_BASELINE);
+  assert.equal(f.reason, 'no baseline yet');
   assert.equal(f.hr, 131.2);
-  assert.equal(f.hrQuality, HRQ.SINGLE);
-  assert.equal(f.hrB, null);
+  assert.equal(f.hrQuality, HRQ.OK);
   close(f.skin, 34.10, 'skin');
+  close(f.airC, 22.50, 'air');
   close(f.activity, 0.21, 'activity');
   assert.equal(f.baselineRunning, false);
   assert.equal(f.battery, null);
 });
 
 test('CSV REFUSE row: the number is withheld, as the device does over Bluetooth', () => {
-  const f = csvLineToFrame('1,nan,0,nan,0,nan,0,0.00,0.010,33.00,33.00,33.00,0,' +
-    '28.00,40.0,2.900,0.00,37.100,36.480,37.720,0.900,0,2,0x8028');
+  const f = csvLineToFrame('1,nan,0.12,0,nan,0.010,33.00,33.00,33.00,2,nan,0.00,' +
+    '37.100,36.480,37.720,0.900,0,2,0x9028');
   assert.equal(f.state, STATE.REFUSE);
   assert.equal(f.core, null);
   assert.equal(f.half, null);
   assert.equal(f.hr, null);
+  assert.equal(f.airC, null);
   assert.equal(f.baselineRunning, true);
   assert.equal(f.reason, 'no trustworthy heart rate');
-  assert.equal(csvLineToFrame('ms,hrA,sqiA'), null);
+  assert.equal(csvLineToFrame('ms,hr,sqi'), null);
+});
+
+test('a 2.1 firmware CSV row (24 columns) is not misread', () => {
+  assert.equal(csvLineToFrame('123456,131.2,0.81,nan,0.10,131.2,1,1.62,0.210,34.10,nan,34.10,2,' +
+    '31.50,63.5,1.370,0.00,37.840,37.220,38.460,0.900,1,1,0x0220'), null);
 });
 
 // ─── datastore: Paused, Starting, and no gap-filling ─────────────────────────

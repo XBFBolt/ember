@@ -86,12 +86,19 @@ class ECTemp:
         return self.ct, self.v
 
 
-def run_series(hr_series, ct_init=CT_INIT_DEFAULT, step_seconds=60.0):
+def run_series(hr_series, ct_init=CT_INIT_DEFAULT, step_seconds=60.0,
+               gamma_sq=None):
     """
     Filter a whole heart-rate series.
     Returns (ct_estimates, posterior_variances), both 1-D arrays.
+
+    gamma_sq overrides the per-minute process noise (default: the published
+    GAMMA_SQ). Only learned_correction.py uses it, to test a tuned filter;
+    the shipped firmware uses the published value.
     """
     f = ECTemp(ct_init=ct_init, step_seconds=step_seconds)
+    if gamma_sq is not None:
+        f.gamma_sq = float(gamma_sq) * (step_seconds / 60.0)
     out_ct, out_v = [], []
     for hr in np.asarray(hr_series, dtype=float):
         if not np.isfinite(hr):
