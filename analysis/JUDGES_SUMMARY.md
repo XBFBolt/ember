@@ -128,6 +128,9 @@ Rising coverage is still a little under 90%, consistent with the remaining lag i
 1. `judges_coverage.png`: Kalman vs conformal coverage by true temperature band
 2. `judges_trial_interval.png`: one held-out trial, Ember vs the filter alone vs true core, with the ± band
 3. `judges_lag.png`: where Watch and Act now stood when true core reached 38.5 °C, filter alone vs Ember 2.3
+4. `judges_rmse.png`: error (RMSE), filter alone vs Ember 2.3 on PROSPIE and the HTT external test, and per person
+5. `judges_range.png`: the range promised vs delivered at 50/80/90/95 %, and how wide the 90 % range is
+6. `judges_early_warning.png`: trials lined up on the minute true core reached 38.5 °C, and how many minutes ahead Watch and Act now were on
 
 ---
 

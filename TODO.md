@@ -102,6 +102,7 @@ Reviewed Oct 24: evaluation now uses 6 strata, the same as the shipped table, so
   - [x] men vs women: bias difference with bootstrap CI
   - [x] optional: rising vs steady coverage
 - [x] Three figures (`figures/`, written by `make_judge_figures.py`): coverage bars (Kalman vs conformal), estimate vs true over one trial with the ± band, alert timing (already on / late / never). Large fonts, readable on a projector.
+- [x] Oct 25: three more from the same script: `judges_rmse.png` (RMSE 0.405 → 0.318, HTT 0.490 → 0.395, better for 31/37 people), `judges_range.png` (promised vs delivered at 50/80/90/95 %; ± 0.17 Kalman / 0.67 filter alone / 0.49 Ember), `judges_early_warning.png` (trials lined up on true 38.5; Watch on in time 65/73, median 12 min ahead, 40/73 at least 10 min). The first three are unchanged.
 - [x] Put the real headline numbers on the webapp "How sure is Ember?" sheet; remove the synthetic note.
 - [ ] Optional: read the spreadsheet's red (interpolated) cells with openpyxl and report how many scored minutes were interpolated.
 
@@ -126,6 +127,10 @@ A linear correction on top of ECTemp, from heart-rate features the device alread
 - [ ] On the device: run BASELINE, then check the ± in the app drops from ~0.6–0.8 to ~0.4–0.6.
 - [ ] Re-record the replay session on 2.3 (old recordings carry 2.2 numbers).
 - [ ] Optional: train on PROSPIE, test on the firefighter dataset (DOI 10.17632/7ghxcsd9sz.1) to answer "does it hold in general?".
+- [x] Oct 25: external test on a second dataset instead (the firefighter set only has session-summary HR). HTT, DOI 10.17632/g5sb382smp.1, CC BY 4.0: 65 people (32 F, 33 M), 2 h walking in heat and thermoneutral, ingestible-pill core, HR every minute. `analysis/load_htt.py` (adapter; pill-artifact rules fixed before any model run), `analysis/external_test.py` → `external_htt_results.txt` / `.json`. Applies the shipped 2.3 calibration read straight from `conformal_table.h` (checked against the golden vectors), nothing refitted.
+  - 90 % range covered **82.0 %** [77.5, 86.3 over people] vs 89.2 % on PROSPIE; Kalman "90 %" covered 26.7 % (34.3 % on PROSPIE). RMSE 0.40 (filter alone 0.49); correction better for 54/65 people. Coverage at true ≥ 38.5: 90.0 %.
+  - The extra misses are over-reads (12.2 % too high vs 3.9 %), late in 2 h steady walks: HR keeps drifting up while core levels off. Under-reads, the dangerous side, 5.8 % vs 6.9 %. Cost: Act now false alarms in 25/82 calm trials (PROSPIE 13/55).
+  - Pooling PROSPIE + HTT (plan step 3) is not done; it would change the shipped table.
 
 ## Phase 3 · Firmware v2 fixes (tonight, before the team flashes)
 

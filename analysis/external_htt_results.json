@@ -1,0 +1,296 @@
+{
+  "calibration_source": "Prospie dataset_open access V3.xlsx (HR: Equivital chest ECG, Polar chest strap)",
+  "test_data": "HTT data set.xlsx (DOI 10.17632/g5sb382smp.1)",
+  "ember": {
+    "rmse": 0.3949251619854883,
+    "bias": 0.10400638504066338,
+    "coverage_90": 0.8198191351926438,
+    "mean_half": 0.5103056767231545,
+    "coverage_hot": 0.9002795899347623,
+    "watch_on": 39,
+    "watch_never": 1,
+    "act_on": 14,
+    "act_never": 11,
+    "act_false_trials": 25,
+    "danger_trials": 46,
+    "calm_trials": 82,
+    "kalman_coverage": 0.26681358765863666,
+    "n_subjects": 65,
+    "n_minutes": 13159,
+    "n_trials": 128
+  },
+  "filter_alone": {
+    "rmse": 0.48958756551510196,
+    "bias": -0.06619569396150046,
+    "coverage_90": 0.8139676267193555,
+    "mean_half": 0.6565926894140901,
+    "coverage_hot": 0.8182665424044734,
+    "watch_on": 38,
+    "watch_never": 2,
+    "act_on": 19,
+    "act_never": 12,
+    "act_false_trials": 26,
+    "danger_trials": 46,
+    "calm_trials": 82,
+    "kalman_coverage": 0.26681358765863666,
+    "n_subjects": 65,
+    "n_minutes": 13159,
+    "n_trials": 128
+  },
+  "prospie_reference": {
+    "rmse": 0.31823167367483846,
+    "bias": -0.009283370757898002,
+    "coverage_90": 0.8916743821665124,
+    "mean_half": 0.49463370315385996,
+    "coverage_hot": 0.7123799359658485,
+    "watch_on": 65,
+    "watch_never": 0,
+    "act_on": 17,
+    "act_never": 27,
+    "act_false_trials": 13,
+    "danger_trials": 73,
+    "calm_trials": 55,
+    "kalman_coverage": 0.3432803931343921
+  },
+  "ci": {
+    "coverage_90": [
+      0.7745131456097527,
+      0.8632721062904556
+    ],
+    "rmse": [
+      0.34513701538526004,
+      0.45002953905618215
+    ],
+    "bias": [
+      0.04157658312259168,
+      0.16745450998725422
+    ]
+  },
+  "people_improved": 54,
+  "by_band": [
+    {
+      "band": "normal (<37.5)",
+      "n": 2317,
+      "coverage": 0.6482520500647388,
+      "bias": 0.38225000798966424
+    },
+    {
+      "band": "warm (37.5-38.0)",
+      "n": 4795,
+      "coverage": 0.8398331595411888,
+      "bias": 0.10688935554438227
+    },
+    {
+      "band": "watch (38.0-38.5)",
+      "n": 4974,
+      "coverage": 0.8630880579010857,
+      "bias": 0.010102364653667272
+    },
+    {
+      "band": "act now (\u226538.5)",
+      "n": 1073,
+      "coverage": 0.9002795899347623,
+      "bias": -0.07440528367625025
+    }
+  ],
+  "condition_heat": {
+    "rmse": 0.40516677267317336,
+    "bias": 0.12149596919886785,
+    "coverage_90": 0.8346017250126839,
+    "mean_half": 0.5190220700152197,
+    "coverage_hot": 0.9023569023569024,
+    "watch_on": 31,
+    "watch_never": 0,
+    "act_on": 11,
+    "act_never": 6,
+    "act_false_trials": 14,
+    "danger_trials": 36,
+    "calm_trials": 29,
+    "kalman_coverage": 0.2731270082868256,
+    "n_subjects": 65,
+    "n_minutes": 5913,
+    "n_trials": 65,
+    "coverage_ci": [
+      0.7774705154096834,
+      0.8852950384089234
+    ]
+  },
+  "condition_neutral": {
+    "rmse": 0.3863665270860011,
+    "bias": 0.08973424715390335,
+    "coverage_90": 0.8077560033121722,
+    "mean_half": 0.503192782224675,
+    "coverage_hot": 0.8901098901098901,
+    "watch_on": 8,
+    "watch_never": 1,
+    "act_on": 3,
+    "act_never": 5,
+    "act_false_trials": 11,
+    "danger_trials": 10,
+    "calm_trials": 53,
+    "kalman_coverage": 0.261661606403533,
+    "n_subjects": 63,
+    "n_minutes": 7246,
+    "n_trials": 63,
+    "coverage_ci": [
+      0.7481986419917455,
+      0.8666314525625354
+    ]
+  },
+  "sex_bias_diff": {
+    "groups": [
+      "F",
+      "M"
+    ],
+    "point": 0.12113570046457933,
+    "ci": [
+      -7.6933317160192e-05,
+      0.24166117546299962
+    ],
+    "p_exceeds_zero": 0.9745
+  },
+  "sex_rmse_diff": {
+    "groups": [
+      "F",
+      "M"
+    ],
+    "point": 0.06104220009616457,
+    "ci": [
+      -0.02920414966009843,
+      0.1546626102151543
+    ],
+    "p_exceeds_zero": 0.894
+  },
+  "by_sex": {
+    "F": {
+      "rmse": 0.36007884915548855,
+      "bias": 0.03717416485882236,
+      "coverage_90": 0.8328530259365994,
+      "mean_half": 0.5201457196134929,
+      "coverage_hot": 0.8838095238095238,
+      "watch_on": 20,
+      "watch_never": 1,
+      "act_on": 7,
+      "act_never": 6,
+      "act_false_trials": 17,
+      "danger_trials": 25,
+      "calm_trials": 38,
+      "kalman_coverage": 0.23241227326665537,
+      "n_subjects": 32,
+      "n_minutes": 5899,
+      "n_trials": 63
+    },
+    "M": {
+      "rmse": 0.4211210492516531,
+      "bias": 0.1583098653234017,
+      "coverage_90": 0.809228650137741,
+      "mean_half": 0.5023103030303023,
+      "coverage_hot": 0.916058394160584,
+      "watch_on": 19,
+      "watch_never": 0,
+      "act_on": 7,
+      "act_never": 5,
+      "act_false_trials": 8,
+      "danger_trials": 21,
+      "calm_trials": 44,
+      "kalman_coverage": 0.29476584022038566,
+      "n_subjects": 33,
+      "n_minutes": 7260,
+      "n_trials": 65
+    }
+  },
+  "miss_direction": {
+    "htt": {
+      "too_high": 0.12174177369100996,
+      "too_low": 0.05843909111634623
+    },
+    "prospie": {
+      "too_high": 0.039455879210882415,
+      "too_low": 0.06886973862260523
+    }
+  },
+  "by_time": [
+    {
+      "minutes": "[0, 10)",
+      "n": 1216,
+      "coverage": 0.7335526315789473,
+      "bias": 0.029200128835431216,
+      "too_high": 0.14638157894736842,
+      "too_low": 0.12006578947368421
+    },
+    {
+      "minutes": "[10, 30)",
+      "n": 2480,
+      "coverage": 0.7923387096774194,
+      "bias": -0.09227746283652295,
+      "too_high": 0.05282258064516129,
+      "too_low": 0.15483870967741936
+    },
+    {
+      "minutes": "[30, 60)",
+      "n": 3539,
+      "coverage": 0.890647075445041,
+      "bias": 0.03198075409677342,
+      "too_high": 0.0647075445040972,
+      "too_low": 0.04464538005086183
+    },
+    {
+      "minutes": "[60, 90)",
+      "n": 3047,
+      "coverage": 0.8313094847390876,
+      "bias": 0.2003382990567932,
+      "too_high": 0.1526091237282573,
+      "too_low": 0.01608139153265507
+    },
+    {
+      "minutes": "[90, 121)",
+      "n": 2877,
+      "coverage": 0.7806743135210289,
+      "bias": 0.29139731871611124,
+      "too_high": 0.20820298922488703,
+      "too_low": 0.011122697254084116
+    }
+  ],
+  "minutes_left_after_danger": {
+    "htt_median": 25.5,
+    "prospie_median": 53.0
+  },
+  "sensitivity": {
+    "pill (TP) only": {
+      "rmse": 0.396710885633555,
+      "bias": 0.10479745823952538,
+      "coverage_90": 0.8193800341713449,
+      "mean_half": 0.5103087055569108,
+      "coverage_hot": 0.892462311557789,
+      "watch_on": 36,
+      "watch_never": 1,
+      "act_on": 14,
+      "act_never": 11,
+      "act_false_trials": 22,
+      "danger_trials": 43,
+      "calm_trials": 75,
+      "kalman_coverage": 0.2647465625254251,
+      "n_subjects": 64,
+      "n_minutes": 12291,
+      "n_trials": 118
+    },
+    "no dip rule": {
+      "rmse": 0.4403581359617495,
+      "bias": 0.12407739964413828,
+      "coverage_90": 0.8064372918978913,
+      "mean_half": 0.5095220643729182,
+      "coverage_hot": 0.8972222222222223,
+      "watch_on": 39,
+      "watch_never": 2,
+      "act_on": 15,
+      "act_never": 13,
+      "act_false_trials": 23,
+      "danger_trials": 50,
+      "calm_trials": 78,
+      "kalman_coverage": 0.26148723640399557,
+      "n_subjects": 65,
+      "n_minutes": 13515,
+      "n_trials": 128
+    }
+  }
+}

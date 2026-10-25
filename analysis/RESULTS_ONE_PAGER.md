@@ -93,5 +93,5 @@ Published validations of this algorithm are mostly male; one 251-subject study h
 
 ---
 
-**Figures**: `figures/judges_coverage.png`, `figures/judges_trial_interval.png`, `figures/judges_lag.png`
+**Figures**: `figures/judges_coverage.png`, `figures/judges_trial_interval.png`, `figures/judges_lag.png`, `figures/judges_rmse.png`, `figures/judges_range.png`, `figures/judges_early_warning.png`
 **Full results**: `analysis/JUDGES_SUMMARY.md`, `analysis/judges_results.txt`, `analysis/judges_results.json`
