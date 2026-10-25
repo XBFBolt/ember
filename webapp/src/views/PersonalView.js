@@ -1,8 +1,8 @@
 /**
  * PersonalView.js — wearer's view (the live demo).
  *
- * Uses the design-export markup and render approach, wired to live
- * datastore data. Status thresholds come from THRESHOLDS in datastore.js.
+ * Renders live datastore data. Status thresholds come from THRESHOLDS in
+ * datastore.js.
  * All times (elapsed, breaks, water) run on the data clock (snapshot.now),
  * so the demo simulation and a real device behave the same way.
  */
@@ -22,7 +22,7 @@ import { sendCommand } from '../lib/device.js';
 import { FLAG } from '../lib/frame.js';
 
 // ─── wearer + placeholder schedule ───────────────────────────────────────────
-// Placeholder until taken from a published heat-index table (see TODO Phase 2).
+// Placeholder schedule, not yet taken from a published work/rest table.
 const WEARER_NAME = 'Charles Nelson';
 const SCHEDULE = {
   workMin:        20,   // 20 on …

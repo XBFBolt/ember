@@ -40,7 +40,7 @@ ECTemp uses one heart-rate curve for everyone and lags a fast rise. Ember adds a
 - **Better for 31 of 37 people.** RMSE change −0.09 °C, 95% CI over people [−0.13, −0.05]. The largest loss for one person was +0.24 °C.
 - **Not just a bias shift.** A constant offset alone also cuts misses but raises Act now false alarms from 13 to 22 (`learned_correction_results.txt`).
 - **Cost**: specificity at 38.0 °C drops from 0.90 to 0.84, so Watch comes on more often when true core is just under 38.0.
-- **Caveat**: the model was chosen among seven variants on this data, so these gains are slightly optimistic. It has not been tested on a second dataset yet.
+- **Caveat**: the model was chosen among seven variants on this data, so these gains are slightly optimistic. On a second dataset it was never fitted to (HTT, section 7), it still lowered error for 54 of 65 people.
 
 ---
 
@@ -106,7 +106,8 @@ Rising coverage is still a little under 90%, consistent with the remaining lag i
 
 - **Pulse sensors.** The filter and the correction only see heart rate, so the chest calibration carries over to any sensor that reports heart rate correctly. In PROSPIE, finger pulse-sensor trials scored about the same as chest trials from the same conditions (bias −0.12 vs −0.11 °C, coverage 85% vs 80%). The demo uses a low-cost pulse sensor; a product would use a validated heart-rate sensor.
 - **Missing heart rate.** In the conditions where heart rate was missing in about 80% of minutes, the range held 80–85%, against 89% overall. Gaps in heart rate cost coverage, so the device must keep dropouts rare and widen the ± while it is coasting.
-- **One dataset.** All 37 people come from one lab, walking on a treadmill in a heat chamber. Running, lifting, outdoor work or older wearers may differ. The next test is training on PROSPIE and testing on the open firefighter dataset (DOI 10.17632/7ghxcsd9sz.1).
+- **One training dataset.** All 37 people come from one lab, walking on a treadmill in a heat chamber. Running, lifting, outdoor work or older wearers may differ.
+- **External test (HTT).** The shipped 2.3 calibration, read straight from `conformal_table.h` with nothing refitted, on 65 new people (32 women, 33 men; 2 h walking in heat and thermoneutral; ingestible-pill core; DOI 10.17632/g5sb382smp.1, CC BY 4.0). The 90% range covered **82.0%** (95% CI over people [77.5, 86.3]) against 89.2% on PROSPIE; the Kalman "90%" range covered 26.7%. RMSE 0.40 °C (filter alone 0.49), better for 54 of 65 people; coverage at true ≥ 38.5 °C 90%. The extra misses are over-reads late in long steady walks, where heart rate keeps drifting up while core levels off: too high 12.2% vs 3.9%, too low (the dangerous side) 5.8% vs 6.9%. Cost: Act now false alarms in 25 of 82 calm trials (PROSPIE 13 of 55). Part of the gap is the reference (pill vs rectal). Full output: `analysis/external_htt_results.txt`.
 - **Resting heart rate** comes from the first 10 minutes of each trial here, and from the 5-minute BASELINE on the device.
 - **Accuracy overall**: RMSE 0.32 °C, bias −0.01 °C, R² 0.67. Detecting true core ≥ 38.0 °C: sensitivity 75.2%, specificity 84.2%.
 - Not a medical device.
@@ -120,6 +121,7 @@ Rising coverage is still a little under 90%, consistent with the remaining lag i
 3. When true core reached 38.5 °C, **Watch was already on in 89%** of trials (was 64%); **Act now never fired in 37%** (was 47%).
 4. At true core ≥ 38.5 °C, Ember's coverage is **71%**, not 90%, because the estimate still lags. Watch is the safety threshold, not an extra.
 5. No clear difference between men and women (bias −0.06 °C, CI [−0.16, +0.05]).
+6. On 65 new people from a second dataset, with nothing refitted, the range covered **82%** (Kalman 27%). The extra misses are over-reads, not under-reads.
 
 ---
 
@@ -146,6 +148,6 @@ Rising coverage is still a little under 90%, consistent with the remaining lag i
 ---
 
 **Generated**: 2026-10-24
-**Scripts**: `analysis/evaluate.py --prefix ember_chest`, `analysis/judges_results.py`, `analysis/make_judge_figures.py`, `analysis/export_firmware_table.py`
-**Output**: `analysis/results_chest.txt`, `analysis/judges_results.txt`, `analysis/judges_results.json`
+**Scripts**: `analysis/evaluate.py --prefix ember_chest`, `analysis/judges_results.py`, `analysis/external_test.py`, `analysis/make_judge_figures.py`, `analysis/export_firmware_table.py`
+**Output**: `analysis/results_chest.txt`, `analysis/judges_results.txt`, `analysis/judges_results.json`, `analysis/external_htt_results.txt`
 **Filter alone (2.2) numbers**: `python3 evaluate.py --no-correction`, or section 7 of `judges_results.txt`

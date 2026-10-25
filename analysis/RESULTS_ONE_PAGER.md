@@ -74,7 +74,8 @@ Published validations of this algorithm are mostly male; one 251-subject study h
 
 ## Limits
 
-- One dataset, one lab, treadmill walking in a heat chamber. The correction was chosen among seven variants on this data, so its gains are slightly optimistic. Next test: a second dataset (open firefighter data).
+- Trained on one dataset, one lab, treadmill walking in a heat chamber. The correction was chosen among seven variants on this data, so its gains are slightly optimistic.
+- On a second dataset never used for fitting (HTT, 65 people, ingestible pill), the 90% range covered 82%, not 89% (Kalman 27%). The extra misses are over-reads late in long walks, so the cost is false alarms (Act now in 25 of 82 calm trials), not missed heat.
 - Calibrated on chest ECG heart rate. It carries over to any sensor that reads heart rate correctly; the demo uses a low-cost pulse sensor, a product would use a validated one.
 - Coverage drops to 71% at true core ≥ 38.5 °C; Act now never fired in 37% of trials that got there.
 - Watch comes on a little more often just under 38.0 °C than before the correction (specificity 0.84, was 0.90).

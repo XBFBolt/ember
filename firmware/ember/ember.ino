@@ -33,8 +33,8 @@
  *    Plug into the port marked USB   -> USB CDC On Boot: Enabled
  *    Either works. Pick one and stick with it.
  *
- *  SERIAL 115200 - type HELP. Every build gate in the guide uses one of
- *  these commands, so this is the only firmware you ever flash.
+ *  SERIAL 115200 - type HELP. Every bench check uses one of these
+ *  commands, so this is the only firmware you ever flash.
  *
  *  NOT A MEDICAL DEVICE. Bench demonstrator, consenting adults.
  * ================================================================

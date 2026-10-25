@@ -1,5 +1,5 @@
 """
-Phase 2 analysis for judges: all the numbers that matter for the presentation.
+Results for judges: all the numbers that matter for the presentation.
 
 This produces:
   1. Coverage comparison: Kalman vs conformal at 90%
@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from conformal import gaussian_interval, coverage
 from evaluate import bootstrap_group_diff
 
-# Temperature thresholds (from TODO Phase 1)
+# Temperature thresholds (Watch / Act now, same as THRESHOLDS in the webapp)
 WATCH_C = 38.0
 ACT_NOW_C = 38.5
 TEMP_BANDS = [

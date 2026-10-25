@@ -4,8 +4,8 @@ import { THRESHOLDS } from './datastore.js';
  * estimator.js — trend and forecast helpers, plus a JS mirror of the firmware Kalman filter.
  *
  * The displayed forecast is a range from the last 10 minutes' trend
- * (forecastRange). projectForward is kept for the Phase 2 filter-agreement
- * test; it is not used on screen.
+ * (forecastRange). projectForward is kept for checking agreement with the
+ * firmware filter; it is not used on screen.
  *
  * The estimate on screen comes from the device and already includes the
  * learned correction (firmware 2.3, ember_core.h struct Correction). The
